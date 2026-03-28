@@ -15,9 +15,9 @@ export async function loadEvents(client: BotClient): Promise<void> {
       if (!event?.name || !event?.execute) continue;
 
       if (event.once) {
-        client.once(event.name, (...args) => event.execute(...args));
+        client.once(event.name, (...args) => event.execute(...args, client));
       } else {
-        client.on(event.name, (...args) => event.execute(...args));
+        client.on(event.name, (...args) => event.execute(...args, client));
       }
       logger.debug(`Loaded event: ${event.name}`);
     } catch (err) {
