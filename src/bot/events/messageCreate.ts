@@ -1,6 +1,6 @@
 import { Message } from 'discord.js';
 import { BotEvent } from '../../types';
-import { isModuleEnabled } from '../cache/CacheManager';
+import { isModuleEnabled } from '../../modules/cache/CacheManager';
 import { incrementDailyStat } from '../../database/models/Stats';
 import { AutoResponseModel } from '../../database/models/AutoResponse';
 
@@ -16,12 +16,12 @@ const event: BotEvent = {
     }
 
     if (await isModuleEnabled(guildId, 'antilink')) {
-      const { AntiLink } = await import('../antilink/AntiLink');
+      const { AntiLink } = await import('../../modules/antilink/AntiLink');
       await AntiLink.check(message).catch(() => null);
     }
 
     if (await isModuleEnabled(guildId, 'ai')) {
-      const { AIModeration } = await import('../ai/AIModeration');
+      const { AIModeration } = await import('../../modules/ai/AIModeration');
       await AIModeration.analyze(message).catch(() => null);
     }
 

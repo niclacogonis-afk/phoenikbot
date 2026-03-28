@@ -74,8 +74,7 @@ const command: Command = {
       tag.uses++;
       await tag.save();
 
-      const content = targetUser ? `${targetUser}` : undefined;
-      await interaction.reply({ content, content: tag.isEmbed ? undefined : (targetUser ? `${targetUser}\n${tag.content}` : tag.content) });
+      await interaction.reply({ content: tag.isEmbed ? (targetUser ? `${targetUser}` : undefined) : (targetUser ? `${targetUser}\n${tag.content}` : tag.content) });
       return;
     }
 

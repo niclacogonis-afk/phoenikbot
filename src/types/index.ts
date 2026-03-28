@@ -1,5 +1,7 @@
 import {
   SlashCommandBuilder,
+  SlashCommandOptionsOnlyBuilder,
+  SlashCommandSubcommandsOnlyBuilder,
   ContextMenuCommandBuilder,
   ChatInputCommandInteraction,
   ButtonInteraction,
@@ -11,7 +13,7 @@ import {
 import { BotClient } from '../bot/client';
 
 export interface Command {
-  data: SlashCommandBuilder | ContextMenuCommandBuilder | Omit<SlashCommandBuilder, 'addSubcommand' | 'addSubcommandGroup'>;
+  data: SlashCommandBuilder | ContextMenuCommandBuilder | SlashCommandOptionsOnlyBuilder | SlashCommandSubcommandsOnlyBuilder | Omit<SlashCommandBuilder, 'addSubcommand' | 'addSubcommandGroup'>;
   category?: string;
   cooldown?: number;
   ownerOnly?: boolean;
@@ -37,7 +39,7 @@ export interface ModalHandler {
 export interface BotEvent {
   name: string;
   once?: boolean;
-  execute: (...args: unknown[]) => Promise<void> | void;
+  execute: (...args: any[]) => Promise<void> | void;
 }
 
 export type ModuleName =

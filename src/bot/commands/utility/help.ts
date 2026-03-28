@@ -43,7 +43,7 @@ const command: Command = {
       const embed = new EmbedBuilder()
         .setColor(0x5865F2)
         .setTitle(`Help: /${cmd.data.name}`)
-        .setDescription(cmd.data.description)
+        .setDescription('description' in cmd.data ? cmd.data.description : 'No description available')
         .addFields(
           { name: 'Category', value: cmd.category ?? 'General', inline: true },
           { name: 'Cooldown', value: `${cmd.cooldown ?? 3}s`, inline: true },
@@ -94,7 +94,7 @@ const command: Command = {
       const catEmbed = new EmbedBuilder()
         .setColor(0x5865F2)
         .setTitle(`${catInfo.emoji} ${category} Commands`)
-        .setDescription(cmds.length ? cmds.map((c) => `\`/${c.data.name}\` — ${c.data.description}`).join('\n') : 'No commands in this category.')
+        .setDescription(cmds.length ? cmds.map((c) => `\`/${c.data.name}\` — ${'description' in c.data ? c.data.description : ''}`).join('\n') : 'No commands in this category.')
         .setTimestamp();
 
       await i.update({ embeds: [catEmbed], components: [menu] });

@@ -1,8 +1,8 @@
 import { GuildMember, EmbedBuilder } from 'discord.js';
 import { BotEvent } from '../../types';
-import { isModuleEnabled } from '../cache/CacheManager';
+import { isModuleEnabled } from '../../modules/cache/CacheManager';
 import { incrementDailyStat } from '../../database/models/Stats';
-import { sendLog } from '../logging/LogManager';
+import { sendLog } from '../../modules/logging/LogManager';
 import { GlobalBanModel } from '../../database/models/GlobalBan';
 import { getUser } from '../../database/models/User';
 
@@ -16,7 +16,7 @@ const event: BotEvent = {
     }
 
     if (await isModuleEnabled(guildId, 'antirAid')) {
-      const { RaidDetector } = await import('../antirAid/RaidDetector');
+      const { RaidDetector } = await import('../../modules/antirAid/RaidDetector');
       await RaidDetector.onMemberJoin(member).catch(() => null);
     }
 

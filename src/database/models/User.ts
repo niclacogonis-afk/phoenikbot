@@ -1,6 +1,6 @@
 import mongoose, { Document, Schema } from 'mongoose';
 
-interface IWarn {
+export interface IWarn {
   id: string;
   reason: string;
   moderatorId: string;

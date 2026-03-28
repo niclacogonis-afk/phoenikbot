@@ -1,8 +1,8 @@
 import { GuildMember, PartialGuildMember, EmbedBuilder } from 'discord.js';
 import { BotEvent } from '../../types';
-import { isModuleEnabled } from '../cache/CacheManager';
+import { isModuleEnabled } from '../../modules/cache/CacheManager';
 import { incrementDailyStat } from '../../database/models/Stats';
-import { sendLog } from '../logging/LogManager';
+import { sendLog } from '../../modules/logging/LogManager';
 
 const event: BotEvent = {
   name: 'guildMemberRemove',

@@ -42,9 +42,11 @@ export class AntiLink {
           await WarnManager.addWarn(message.member, `Posted a blocked link: ${hostname}`, message.guild.members.me?.id ?? 'BOT');
         }
 
-        await message.channel.send({
-          content: `${message.author}, links from \`${hostname}\` are not allowed here.`,
-        }).then((m) => setTimeout(() => m.delete().catch(() => null), 5000));
+        if (message.channel.isTextBased() && 'send' in message.channel) {
+          const ch = message.channel as import('discord.js').TextChannel;
+          await ch.send({ content: `${message.author}, links from \`${hostname}\` are not allowed here.` })
+            .then((m) => setTimeout(() => m.delete().catch(() => null), 5000));
+        }
 
         break;
       }

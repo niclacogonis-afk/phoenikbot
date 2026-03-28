@@ -1,7 +1,7 @@
 import { GuildChannel, EmbedBuilder } from 'discord.js';
 import { BotEvent } from '../../types';
-import { isModuleEnabled } from '../cache/CacheManager';
-import { sendLog } from '../logging/LogManager';
+import { isModuleEnabled } from '../../modules/cache/CacheManager';
+import { sendLog } from '../../modules/logging/LogManager';
 
 const event: BotEvent = {
   name: 'channelDelete',
@@ -10,7 +10,7 @@ const event: BotEvent = {
     const guildId = channel.guild.id;
 
     if (await isModuleEnabled(guildId, 'antinuke')) {
-      const { AntiNuke } = await import('../antirAid/AntiNuke');
+      const { AntiNuke } = await import('../../modules/antirAid/AntiNuke');
       await AntiNuke.onChannelDelete(channel).catch(() => null);
     }
 

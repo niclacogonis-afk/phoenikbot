@@ -34,7 +34,7 @@ Do not make assumptions on important decisions — get clarification first.
 
 Gather requirements from user, produce `spec.md` with full architecture, database models, and system designs. Break work into concrete phases in `plan.md`.
 
-### [ ] Step 1: Project Setup & Core Infrastructure
+### [x] Step 1: Project Setup & Core Infrastructure
 <!-- chat-id: 138a863c-8088-4007-9993-24592b1d47c9 -->
 
 Initialize the TypeScript Discord.js project from scratch.

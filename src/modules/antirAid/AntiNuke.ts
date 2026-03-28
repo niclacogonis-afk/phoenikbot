@@ -1,4 +1,4 @@
-import { Guild, User, GuildChannel, AuditLogEvent, PermissionFlagsBits, EmbedBuilder } from 'discord.js';
+import { Guild, User, PartialUser, GuildChannel, AuditLogEvent, PermissionFlagsBits, EmbedBuilder } from 'discord.js';
 import { getGuild } from '../../database/models/Guild';
 import { getCachedGuild } from '../cache/CacheManager';
 import { logger } from '../../utils/logger';
@@ -30,7 +30,7 @@ export class AntiNuke {
       const count = trackAction(channel.guild.id, entry.executor.id, 'channel_delete');
 
       if (count >= threshold) {
-        await AntiNuke.punishUser(channel.guild, entry.executor);
+        await AntiNuke.punishUser(channel.guild, entry.executor as User);
       }
     } catch (err) {
       logger.debug('AntiNuke channel delete error:', err instanceof Error ? err : new Error(String(err)));
@@ -48,7 +48,7 @@ export class AntiNuke {
       const count = trackAction(guild.id, entry.executor.id, 'ban');
 
       if (count >= threshold) {
-        await AntiNuke.punishUser(guild, entry.executor);
+        await AntiNuke.punishUser(guild, entry.executor as User);
       }
     } catch (err) {
       logger.debug('AntiNuke ban error:', err instanceof Error ? err : new Error(String(err)));

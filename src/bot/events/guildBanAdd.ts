@@ -1,7 +1,7 @@
 import { Guild, User, EmbedBuilder } from 'discord.js';
 import { BotEvent } from '../../types';
-import { isModuleEnabled } from '../cache/CacheManager';
-import { sendLog } from '../logging/LogManager';
+import { isModuleEnabled } from '../../modules/cache/CacheManager';
+import { sendLog } from '../../modules/logging/LogManager';
 import { incrementDailyStat } from '../../database/models/Stats';
 
 const event: BotEvent = {
@@ -14,7 +14,7 @@ const event: BotEvent = {
     }
 
     if (await isModuleEnabled(guildId, 'antinuke')) {
-      const { AntiNuke } = await import('../antirAid/AntiNuke');
+      const { AntiNuke } = await import('../../modules/antirAid/AntiNuke');
       await AntiNuke.onBan(ban.guild, ban.user).catch(() => null);
     }
 

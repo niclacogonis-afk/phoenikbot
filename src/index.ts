@@ -9,6 +9,7 @@ import { loadButtons } from './bot/handlers/buttonHandler';
 import { loadSelectMenus } from './bot/handlers/selectMenuHandler';
 import { loadModals } from './bot/handlers/modalHandler';
 import { config } from './config';
+import type { TextChannel } from 'discord.js';
 import cron from 'node-cron';
 
 setupErrorHandlers();

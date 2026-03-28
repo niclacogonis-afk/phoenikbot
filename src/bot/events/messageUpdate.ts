@@ -1,7 +1,7 @@
 import { Message, PartialMessage, EmbedBuilder } from 'discord.js';
 import { BotEvent } from '../../types';
-import { isModuleEnabled } from '../cache/CacheManager';
-import { sendLog } from '../logging/LogManager';
+import { isModuleEnabled } from '../../modules/cache/CacheManager';
+import { sendLog } from '../../modules/logging/LogManager';
 import { truncate } from '../../utils/formatters';
 
 const event: BotEvent = {
