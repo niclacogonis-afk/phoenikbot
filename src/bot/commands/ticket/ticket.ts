@@ -29,15 +29,20 @@ const command: Command = {
   category: 'Ticket',
 
   async execute(interaction: ChatInputCommandInteraction) {
-    if (!interaction.guild || !(interaction.member instanceof GuildMember)) return;
+    if (!interaction.guild || !(interaction.member instanceof GuildMember)) {
+      await interaction.reply({ embeds: [errorEmbed('Error', 'Must be used in a server.')], ephemeral: true });
+      return;
+    }
+
+    await interaction.deferReply({ ephemeral: true });
 
     if (!await isModuleEnabled(interaction.guild.id, 'ticket')) {
-      await interaction.reply({ embeds: [errorEmbed('Module Disabled', 'Ticket module is not enabled. Use `/config module enable ticket`.')], ephemeral: true });
+      await interaction.editReply({ embeds: [errorEmbed('Module Disabled', 'Ticket module is not enabled. Use `/config module enable ticket`.')] });
       return;
     }
 
     if (!await isStaff(interaction.member)) {
-      await interaction.reply({ embeds: [errorEmbed('Permission Denied')], ephemeral: true });
+      await interaction.editReply({ embeds: [errorEmbed('Permission Denied')] });
       return;
     }
 
@@ -56,7 +61,7 @@ const command: Command = {
       if (autoCloseHours) config.autoCloseHours = autoCloseHours;
       await config.save();
 
-      await interaction.reply({ embeds: [successEmbed('Ticket System Configured', `Staff role: ${staffRole}\nLog channel: ${logChannel ?? 'Not set'}`)], ephemeral: true });
+      await interaction.editReply({ embeds: [successEmbed('Ticket System Configured', `Staff role: ${staffRole}\nLog channel: ${logChannel ?? 'Not set'}`)] });
       return;
     }
 
@@ -87,7 +92,10 @@ const command: Command = {
       }
 
       const targetChannel = interaction.guild.channels.cache.get(channel.id);
-      if (!targetChannel?.isTextBased()) return;
+      if (!targetChannel?.isTextBased()) {
+        await interaction.editReply({ embeds: [errorEmbed('Invalid Channel', 'The selected channel is not a text channel.')] });
+        return;
+      }
 
       const msg = await (targetChannel as import('discord.js').TextChannel).send({ embeds: [embed], components: rows });
 
@@ -95,7 +103,7 @@ const command: Command = {
       config.panelMessageId = msg.id;
       await config.save();
 
-      await interaction.reply({ embeds: [successEmbed('Panel Sent', `Ticket panel sent to ${channel}.`)], ephemeral: true });
+      await interaction.editReply({ embeds: [successEmbed('Panel Sent', `Ticket panel sent to ${channel}.`)] });
       return;
     }
 
@@ -116,7 +124,7 @@ const command: Command = {
           { name: 'Total', value: String(total), inline: true },
         )
         .setTimestamp();
-      await interaction.reply({ embeds: [embed] });
+      await interaction.editReply({ embeds: [embed] });
     }
   },
 };

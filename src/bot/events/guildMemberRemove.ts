@@ -19,7 +19,7 @@ const event: BotEvent = {
         .setTitle('👋 Member Left')
         .setThumbnail(member.user?.displayAvatarURL() ?? null)
         .addFields(
-          { name: 'User', value: member.user ? `${member.user.tag}` : 'Unknown', inline: true },
+          { name: 'User', value: member.user ? `${member.user.username}` : 'Unknown', inline: true },
           { name: 'ID', value: member.user?.id ?? 'Unknown', inline: true },
           { name: 'Members', value: `${member.guild.memberCount}`, inline: true }
         )

@@ -34,7 +34,7 @@ export class AIModeration {
       await message.delete().catch(() => null);
 
       const embed = modEmbed('🚨 Roblox Scam Detected', [
-        { name: 'User', value: `${message.author.tag} (${message.author.id})`, inline: true },
+        { name: 'User', value: `${message.author.username} (${message.author.id})`, inline: true },
         { name: 'Channel', value: `<#${message.channel.id}>`, inline: true },
         { name: 'Content', value: message.content.slice(0, 500) },
       ], 0xED4245);

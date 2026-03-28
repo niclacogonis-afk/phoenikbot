@@ -35,7 +35,7 @@ const command: Command = {
     const reason = interaction.options.getString('reason') ?? 'No reason provided';
     const { warnId, totalWarns, action } = await WarnManager.addWarn(target, reason, interaction.user.id);
 
-    let desc = `**${target.user.tag}** has been warned.\n**Warn ID:** \`${warnId}\`\n**Total Warns:** ${totalWarns}`;
+    let desc = `**${target.user.username}** has been warned.\n**Warn ID:** \`${warnId}\`\n**Total Warns:** ${totalWarns}`;
     if (action) desc += `\n**Auto Action:** ${action}`;
 
     await interaction.reply({ embeds: [successEmbed('Member Warned', desc)] });

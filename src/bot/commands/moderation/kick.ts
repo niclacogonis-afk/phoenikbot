@@ -38,15 +38,15 @@ const command: Command = {
     await target.kick(reason);
 
     const embed = modEmbed('👢 Member Kicked', [
-      { name: 'User', value: `${target.user.tag} (${target.user.id})`, inline: true },
-      { name: 'Moderator', value: `${interaction.user.tag}`, inline: true },
+      { name: 'User', value: `${target.user.username} (${target.user.id})`, inline: true },
+      { name: 'Moderator', value: `${interaction.user.username}`, inline: true },
       { name: 'Reason', value: reason },
     ], 0xFEE75C);
     await sendLog(interaction.guild, embed, 'modlog');
     await incrementStat(interaction.guild.id, interaction.user.id, 'kicks').catch(() => null);
     await incrementDailyStat(interaction.guild.id, 'modActions').catch(() => null);
 
-    await interaction.reply({ embeds: [successEmbed('Member Kicked', `**${target.user.tag}** has been kicked.\n**Reason:** ${reason}`)] });
+    await interaction.reply({ embeds: [successEmbed('Member Kicked', `**${target.user.username}** has been kicked.\n**Reason:** ${reason}`)] });
   },
 };
 

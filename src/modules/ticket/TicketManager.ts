@@ -40,12 +40,26 @@ export class TicketManager {
 
     if (!panelChannel) return 'Ticket system is not configured. Please contact an admin.';
 
-    const thread = await panelChannel.threads.create({
-      name: threadName,
-      type: ChannelType.PrivateThread,
-      invitable: false,
-      reason: `Ticket #${ticketNumber} - ${type}`,
-    });
+    let thread;
+    try {
+      thread = await panelChannel.threads.create({
+        name: threadName,
+        type: ChannelType.PrivateThread,
+        invitable: false,
+        reason: `Ticket #${ticketNumber} - ${type}`,
+      });
+    } catch {
+      try {
+        thread = await panelChannel.threads.create({
+          name: threadName,
+          type: ChannelType.PublicThread,
+          reason: `Ticket #${ticketNumber} - ${type}`,
+        });
+      } catch (err) {
+        logger.error('Failed to create ticket thread:', err instanceof Error ? err : new Error(String(err)));
+        return 'Failed to create ticket thread. Make sure the bot has Manage Threads permission.';
+      }
+    }
 
     await thread.members.add(member.user.id);
     for (const roleId of config.staffRoles) {
@@ -116,7 +130,7 @@ export class TicketManager {
       .setColor(0x57F287)
       .setTitle('🎫 Ticket Opened')
       .addFields(
-        { name: 'User', value: `${member.user.tag} (${member.user.id})`, inline: true },
+        { name: 'User', value: `${member.user.username} (${member.user.id})`, inline: true },
         { name: 'Type', value: type, inline: true },
         { name: 'Thread', value: `<#${thread.id}>`, inline: true },
         { name: 'Ticket #', value: String(ticketNumber), inline: true }

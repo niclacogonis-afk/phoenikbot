@@ -24,7 +24,7 @@ const event: BotEvent = {
         .setTitle('🔨 Member Banned')
         .setThumbnail(ban.user.displayAvatarURL())
         .addFields(
-          { name: 'User', value: `${ban.user.tag}`, inline: true },
+          { name: 'User', value: `${ban.user.username}`, inline: true },
           { name: 'ID', value: ban.user.id, inline: true }
         )
         .setTimestamp();

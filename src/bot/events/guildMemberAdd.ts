@@ -28,7 +28,7 @@ const event: BotEvent = {
         .setTitle('👋 Member Joined')
         .setThumbnail(member.user.displayAvatarURL())
         .addFields(
-          { name: 'User', value: `${member.user} (${member.user.tag})`, inline: true },
+          { name: 'User', value: `${member.user} (${member.user.username})`, inline: true },
           { name: 'ID', value: member.user.id, inline: true },
           { name: 'Account Age', value: `${days} days`, inline: true },
           { name: 'Members', value: `${member.guild.memberCount}`, inline: true }

@@ -16,7 +16,7 @@ const event: BotEvent = {
       .setTitle('✏️ Message Edited')
       .setURL(newMessage.url)
       .addFields(
-        { name: 'Author', value: newMessage.author ? `${newMessage.author.tag} (${newMessage.author.id})` : 'Unknown', inline: true },
+        { name: 'Author', value: newMessage.author ? `${newMessage.author.username} (${newMessage.author.id})` : 'Unknown', inline: true },
         { name: 'Channel', value: `<#${newMessage.channel.id}>`, inline: true },
         { name: 'Before', value: truncate(oldMessage.content ?? '[no content]', 512) },
         { name: 'After', value: truncate(newMessage.content ?? '[no content]', 512) }

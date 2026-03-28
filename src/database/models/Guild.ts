@@ -26,6 +26,8 @@ export interface IGuild extends Document {
     enabled: boolean;
     action: 'delete' | 'delete_warn' | 'delete_timeout';
   };
+  verifyRole: string | null;
+  verifyMode: 'button' | 'captcha' | 'roblox' | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -75,6 +77,8 @@ const GuildSchema = new Schema<IGuild>(
       enabled: { type: Boolean, default: false },
       action: { type: String, enum: ['delete', 'delete_warn', 'delete_timeout'], default: 'delete_warn' },
     },
+    verifyRole: { type: String, default: null },
+    verifyMode: { type: String, enum: ['button', 'captcha', 'roblox', null], default: null },
   },
   { timestamps: true }
 );

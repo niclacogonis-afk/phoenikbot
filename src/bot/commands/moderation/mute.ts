@@ -41,8 +41,8 @@ const command: Command = {
     await target.timeout(durationMs, reason);
 
     const embed = modEmbed('🔇 Member Muted', [
-      { name: 'User', value: `${target.user.tag} (${target.user.id})`, inline: true },
-      { name: 'Moderator', value: `${interaction.user.tag}`, inline: true },
+      { name: 'User', value: `${target.user.username} (${target.user.id})`, inline: true },
+      { name: 'Moderator', value: `${interaction.user.username}`, inline: true },
       { name: 'Duration', value: formatDuration(durationMs), inline: true },
       { name: 'Reason', value: reason },
     ], 0xFEE75C);
@@ -50,7 +50,7 @@ const command: Command = {
     await incrementStat(interaction.guild.id, interaction.user.id, 'mutes').catch(() => null);
 
     await interaction.reply({
-      embeds: [successEmbed('Member Muted', `**${target.user.tag}** muted for **${formatDuration(durationMs)}**.\n**Reason:** ${reason}`)],
+      embeds: [successEmbed('Member Muted', `**${target.user.username}** muted for **${formatDuration(durationMs)}**.\n**Reason:** ${reason}`)],
     });
   },
 };

@@ -38,7 +38,7 @@ export class WarnManager {
     await incrementDailyStat(member.guild.id, 'modActions').catch(() => null);
 
     const embed = modEmbed('⚠️ Member Warned', [
-      { name: 'User', value: `${member.user.tag} (${member.user.id})`, inline: true },
+      { name: 'User', value: `${member.user.username} (${member.user.id})`, inline: true },
       { name: 'Moderator', value: `<@${moderatorId}>`, inline: true },
       { name: 'Reason', value: reason },
       { name: 'Warn ID', value: warnId, inline: true },

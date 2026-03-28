@@ -42,7 +42,7 @@ const command: Command = {
       .setColor(0x5865F2)
       .setTitle('💡 New Suggestion')
       .setDescription(content)
-      .setAuthor({ name: interaction.user.tag, iconURL: interaction.user.displayAvatarURL() })
+      .setAuthor({ name: interaction.user.username, iconURL: interaction.user.displayAvatarURL() })
       .addFields(
         { name: '👍 Upvotes', value: '0', inline: true },
         { name: '👎 Downvotes', value: '0', inline: true },

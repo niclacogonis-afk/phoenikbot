@@ -68,7 +68,12 @@ async function handleButton(interaction: ButtonInteraction, client: BotClient) {
     await handler.execute(interaction, client);
   } catch (error) {
     logger.error(`Button error [${customId}]:`, error instanceof Error ? error : new Error(String(error)));
-    await interaction.reply({ embeds: [errorEmbed('Error', 'Something went wrong.')], ephemeral: true }).catch(() => null);
+    const errEmbed = errorEmbed('Error', 'Something went wrong.');
+    if (interaction.replied || interaction.deferred) {
+      await interaction.followUp({ embeds: [errEmbed], ephemeral: true }).catch(() => null);
+    } else {
+      await interaction.reply({ embeds: [errEmbed], ephemeral: true }).catch(() => null);
+    }
   }
 }
 
@@ -83,7 +88,12 @@ async function handleSelectMenu(interaction: StringSelectMenuInteraction, client
     await handler.execute(interaction, client);
   } catch (error) {
     logger.error(`SelectMenu error [${customId}]:`, error instanceof Error ? error : new Error(String(error)));
-    await interaction.reply({ embeds: [errorEmbed('Error', 'Something went wrong.')], ephemeral: true }).catch(() => null);
+    const errEmbed = errorEmbed('Error', 'Something went wrong.');
+    if (interaction.replied || interaction.deferred) {
+      await interaction.followUp({ embeds: [errEmbed], ephemeral: true }).catch(() => null);
+    } else {
+      await interaction.reply({ embeds: [errEmbed], ephemeral: true }).catch(() => null);
+    }
   }
 }
 
@@ -98,7 +108,12 @@ async function handleModal(interaction: ModalSubmitInteraction, client: BotClien
     await handler.execute(interaction, client);
   } catch (error) {
     logger.error(`Modal error [${customId}]:`, error instanceof Error ? error : new Error(String(error)));
-    await interaction.reply({ embeds: [errorEmbed('Error', 'Something went wrong.')], ephemeral: true }).catch(() => null);
+    const errEmbed = errorEmbed('Error', 'Something went wrong.');
+    if (interaction.replied || interaction.deferred) {
+      await interaction.followUp({ embeds: [errEmbed], ephemeral: true }).catch(() => null);
+    } else {
+      await interaction.reply({ embeds: [errEmbed], ephemeral: true }).catch(() => null);
+    }
   }
 }
 

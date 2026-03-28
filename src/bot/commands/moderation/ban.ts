@@ -35,8 +35,8 @@ const command: Command = {
     await interaction.guild.members.ban(target, { reason, deleteMessageSeconds: deleteDays * 86400 });
 
     const embed = modEmbed('🔨 Member Banned', [
-      { name: 'User', value: `${target.tag} (${target.id})`, inline: true },
-      { name: 'Moderator', value: `${interaction.user.tag}`, inline: true },
+      { name: 'User', value: `${target.username} (${target.id})`, inline: true },
+      { name: 'Moderator', value: `${interaction.user.username}`, inline: true },
       { name: 'Reason', value: reason },
     ]);
     await sendLog(interaction.guild, embed, 'modlog');

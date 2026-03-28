@@ -14,7 +14,7 @@ const event: BotEvent = {
       .setColor(0xFEE75C)
       .setTitle('🗑️ Message Deleted')
       .addFields(
-        { name: 'Author', value: message.author ? `${message.author.tag} (${message.author.id})` : 'Unknown', inline: true },
+        { name: 'Author', value: message.author ? `${message.author.username} (${message.author.id})` : 'Unknown', inline: true },
         { name: 'Channel', value: `<#${message.channel.id}>`, inline: true },
         { name: 'Content', value: truncate(message.content ?? '[no content]', 1024) }
       )
