@@ -4,6 +4,7 @@ import {
   PermissionFlagsBits,
   EmbedBuilder,
   ChannelType,
+  GuildMember,
 } from 'discord.js';
 import { Command, ModuleName } from '../../../types';
 import { GuildModel, getGuild } from '../../../database/models/Guild';
@@ -79,24 +80,32 @@ const command: Command = {
 
   async execute(interaction: ChatInputCommandInteraction) {
     if (!interaction.guild) return;
-    if (!interaction.member) return;
 
-    const { GuildMember } = await import('discord.js');
-    if (!(interaction.member instanceof GuildMember)) return;
-    if (!await isAdmin(interaction.member)) {
-      await interaction.reply({ embeds: [errorEmbed('Permission Denied', 'You need Administrator permissions.')], ephemeral: true });
+    await interaction.deferReply({ ephemeral: true });
+
+    try {
+      if (!(interaction.member instanceof GuildMember)) {
+        await interaction.editReply({ embeds: [errorEmbed('Error', 'Could not resolve your member data.')] });
+        return;
+      }
+      if (!await isAdmin(interaction.member)) {
+        await interaction.editReply({ embeds: [errorEmbed('Permission Denied', 'You need Administrator permissions.')] });
+        return;
+      }
+    } catch {
+      await interaction.editReply({ embeds: [errorEmbed('Error', 'Permission check failed.')] });
       return;
     }
 
-    const group = interaction.options.getSubcommandGroup();
-    const sub = interaction.options.getSubcommand();
+    const group = interaction.options.getSubcommandGroup(false);
+    const sub = interaction.options.getSubcommand(false);
 
     if (group === 'module') {
       if (sub === 'list') {
         const guild = await getCachedGuild(interaction.guild.id);
         const lines = MODULE_NAMES.map((m) => `${guild.modules[m] ? '🟢' : '🔴'} \`${m}\``);
         const embed = infoEmbed('Module Status', lines.join('\n'));
-        await interaction.reply({ embeds: [embed], ephemeral: true });
+        await interaction.editReply({ embeds: [embed] });
         return;
       }
 
@@ -110,9 +119,8 @@ const command: Command = {
       );
       invalidateGuildCache(interaction.guild.id);
 
-      await interaction.reply({
+      await interaction.editReply({
         embeds: [successEmbed(`Module ${enabled ? 'Enabled' : 'Disabled'}`, `Module \`${moduleName}\` has been ${enabled ? 'enabled' : 'disabled'}.`)],
-        ephemeral: true,
       });
       return;
     }
@@ -125,18 +133,18 @@ const command: Command = {
         guild.logChannel = channel.id;
         await guild.save();
         invalidateGuildCache(interaction.guild.id);
-        await interaction.reply({ embeds: [successEmbed('Log Channel Set', `Log channel set to ${channel}.`)], ephemeral: true });
+        await interaction.editReply({ embeds: [successEmbed('Log Channel Set', `Log channel set to ${channel}.`)] });
       } else if (sub === 'modlogchannel') {
         const channel = interaction.options.getChannel('channel', true);
         guild.modLogChannel = channel.id;
         await guild.save();
         invalidateGuildCache(interaction.guild.id);
-        await interaction.reply({ embeds: [successEmbed('Mod Log Channel Set', `Mod log channel set to ${channel}.`)], ephemeral: true });
+        await interaction.editReply({ embeds: [successEmbed('Mod Log Channel Set', `Mod log channel set to ${channel}.`)] });
       } else if (sub === 'suggestionschannel') {
         const channel = interaction.options.getChannel('channel', true);
         guild.suggestionsChannel = channel.id;
         await guild.save();
-        await interaction.reply({ embeds: [successEmbed('Suggestions Channel Set', `Suggestions channel set to ${channel}.`)], ephemeral: true });
+        await interaction.editReply({ embeds: [successEmbed('Suggestions Channel Set', `Suggestions channel set to ${channel}.`)] });
       } else if (sub === 'staffrole') {
         const role = interaction.options.getRole('role', true);
         if (!guild.staffRoles.includes(role.id)) {
@@ -144,7 +152,7 @@ const command: Command = {
           await guild.save();
           invalidateGuildCache(interaction.guild.id);
         }
-        await interaction.reply({ embeds: [successEmbed('Staff Role Added', `${role} is now a staff role.`)], ephemeral: true });
+        await interaction.editReply({ embeds: [successEmbed('Staff Role Added', `${role} is now a staff role.`)] });
       } else if (sub === 'adminrole') {
         const role = interaction.options.getRole('role', true);
         if (!guild.adminRoles.includes(role.id)) {
@@ -152,7 +160,9 @@ const command: Command = {
           await guild.save();
           invalidateGuildCache(interaction.guild.id);
         }
-        await interaction.reply({ embeds: [successEmbed('Admin Role Added', `${role} is now an admin role.`)], ephemeral: true });
+        await interaction.editReply({ embeds: [successEmbed('Admin Role Added', `${role} is now an admin role.`)] });
+      } else {
+        await interaction.editReply({ embeds: [errorEmbed('Unknown Subcommand', 'Unknown set subcommand.')] });
       }
       return;
     }
@@ -171,8 +181,11 @@ const command: Command = {
           { name: 'Enabled Modules', value: MODULE_NAMES.filter((m) => guild.modules[m]).map((m) => `\`${m}\``).join(', ') || 'None' }
         )
         .setTimestamp();
-      await interaction.reply({ embeds: [embed], ephemeral: true });
+      await interaction.editReply({ embeds: [embed] });
+      return;
     }
+
+    await interaction.editReply({ embeds: [errorEmbed('Unknown Command', 'Unknown subcommand.')] });
   },
 };
 
