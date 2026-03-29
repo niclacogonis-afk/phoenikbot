@@ -1,4 +1,5 @@
 import 'dotenv/config';
+process.env['NODE_TLS_REJECT_UNAUTHORIZED'] = '0';
 import { setupErrorHandlers } from './utils/errorHandler';
 import { logger } from './utils/logger';
 import { connectDatabase } from './database/connection';

@@ -7,6 +7,16 @@ interface ITicketButton {
   style: number;
 }
 
+const ButtonSubSchema = new Schema<ITicketButton>(
+  {
+    label: { type: String, default: '' },
+    emoji: { type: String, default: '' },
+    type: { type: String, default: 'support' },
+    style: { type: Number, default: 1 },
+  },
+  { _id: false }
+);
+
 export interface ITicketConfig extends Document {
   guildId: string;
   panelChannelId: string | null;
@@ -36,14 +46,7 @@ const TicketConfigSchema = new Schema<ITicketConfig>(
     logChannelId: { type: String, default: null },
     staffRoles: { type: [String], default: [] },
     buttons: {
-      type: [
-        {
-          label: String,
-          emoji: String,
-          type: String,
-          style: Number,
-        },
-      ],
+      type: [ButtonSubSchema],
       default: [
         { label: 'Support', emoji: '🎫', type: 'support', style: 1 },
         { label: 'Report', emoji: '🚨', type: 'report', style: 4 },
