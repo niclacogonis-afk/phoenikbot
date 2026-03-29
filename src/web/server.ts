@@ -2,6 +2,7 @@ import express from 'express';
 import session from 'express-session';
 import passport from 'passport';
 import { Strategy as DiscordStrategy } from 'passport-discord';
+import https from 'https';
 import { config } from '../config';
 import { BotClient } from '../bot/client';
 import { GuildModel, getGuild } from '../database/models/Guild';
@@ -152,12 +153,37 @@ export function createWebServer(client: BotClient) {
     saveUninitialized: false,
   }));
 
+  const tlsAgent = new https.Agent({ rejectUnauthorized: false });
+
   passport.use(new DiscordStrategy({
     clientID: config.clientId,
     clientSecret: config.clientSecret,
     callbackURL: `${config.dashboardUrl}/auth/callback`,
     scope: ['identify', 'guilds'],
-  }, (accessToken, refreshToken, profile, done) => {
+  }, async (accessToken: string, refreshToken: string, profile: any, done: (err: any, user?: any) => void) => {
+    try {
+      if (!profile.guilds || profile.guilds.length === 0) {
+        await new Promise<void>((resolve) => {
+          const req = https.get({
+            hostname: 'discord.com',
+            path: '/api/v10/users/@me/guilds',
+            headers: { Authorization: `Bearer ${accessToken}` },
+            agent: tlsAgent,
+          }, (res) => {
+            let data = '';
+            res.on('data', (chunk) => { data += chunk; });
+            res.on('end', () => {
+              try { profile.guilds = JSON.parse(data); } catch { profile.guilds = []; }
+              resolve();
+            });
+          });
+          req.on('error', () => { profile.guilds = []; resolve(); });
+          req.end();
+        });
+      }
+    } catch {
+      profile.guilds = [];
+    }
     return done(null, profile);
   }));
 
