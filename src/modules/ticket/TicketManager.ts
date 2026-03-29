@@ -85,23 +85,20 @@ export class TicketManager {
       }
 
       const now = new Date();
-      const openMsg = (config.openMessageTemplate || 'Hello {user}! Staff will be with you shortly.\n**Type:** {ticket_type}\n**Date:** {date}')
-        .replace('{user}', `<@${member.user.id}>`)
-        .replace('{date}', formatDate(now))
-        .replace('{ticket_type}', type);
+      const resolveTemplate = (tpl: string) =>
+        tpl
+          .replace(/\{user\}/g, `<@${member.user.id}>`)
+          .replace(/\{username\}/g, member.user.username)
+          .replace(/\{date\}/g, formatDate(now))
+          .replace(/\{ticket_type\}/g, type)
+          .replace(/\{ticket_number\}/g, String(ticketNumber));
+
+      const openMsgText = resolveTemplate(
+        config.openMessageTemplate ||
+          'Hello {user}! A staff member will be with you shortly.\n**Type:** {ticket_type}\n**Date:** {date}'
+      );
 
       const staffPing = config.staffRoles.map((r) => `<@&${r}>`).join(' ');
-
-      const ticketEmbed = new EmbedBuilder()
-        .setColor(0x5865F2)
-        .setTitle(`🎫 Ticket #${ticketNumber}`)
-        .setDescription(openMsg)
-        .addFields(
-          { name: 'Type', value: type, inline: true },
-          { name: 'Priority', value: '🟡 Medium', inline: true },
-          { name: 'Status', value: '🟢 Open', inline: true }
-        )
-        .setTimestamp();
 
       const row1 = new ActionRowBuilder<ButtonBuilder>().addComponents(
         new ButtonBuilder().setCustomId(`ticket:close:${thread.id}`).setLabel('Close').setEmoji('🔒').setStyle(ButtonStyle.Danger),
@@ -121,13 +118,42 @@ export class TicketManager {
           )
       );
 
-      await thread.send({
-        content: staffPing || undefined,
-        embeds: [ticketEmbed],
-        components: [row1, priorityMenu],
-      }).catch((err) => {
-        logger.error('Failed to send ticket initial message:', err instanceof Error ? err : new Error(String(err)));
-      });
+      if (config.openMessageIsEmbed !== false) {
+        const embedTitle = resolveTemplate(config.openMessageEmbedTitle || '🎫 Ticket #{ticket_number}');
+        const colorHex = config.openMessageEmbedColor || '#5865F2';
+        const colorInt = parseInt(colorHex.replace('#', ''), 16) || 0x5865F2;
+
+        const ticketEmbed = new EmbedBuilder()
+          .setColor(colorInt)
+          .setTitle(embedTitle)
+          .setDescription(openMsgText)
+          .addFields(
+            { name: 'Type', value: type, inline: true },
+            { name: 'Priority', value: '🟡 Medium', inline: true },
+            { name: 'Status', value: '🟢 Open', inline: true }
+          )
+          .setTimestamp();
+
+        if (config.openMessageEmbedThumbnail) ticketEmbed.setThumbnail(config.openMessageEmbedThumbnail);
+        if (config.openMessageEmbedImage) ticketEmbed.setImage(config.openMessageEmbedImage);
+        if (config.openMessageEmbedFooter) ticketEmbed.setFooter({ text: resolveTemplate(config.openMessageEmbedFooter) });
+        if (config.openMessageEmbedAuthor) ticketEmbed.setAuthor({ name: resolveTemplate(config.openMessageEmbedAuthor) });
+
+        await thread.send({
+          content: staffPing || undefined,
+          embeds: [ticketEmbed],
+          components: [row1, priorityMenu],
+        }).catch((err) => {
+          logger.error('Failed to send ticket initial message:', err instanceof Error ? err : new Error(String(err)));
+        });
+      } else {
+        await thread.send({
+          content: (staffPing ? staffPing + '\n' : '') + openMsgText,
+          components: [row1, priorityMenu],
+        }).catch((err) => {
+          logger.error('Failed to send ticket initial message:', err instanceof Error ? err : new Error(String(err)));
+        });
+      }
 
       const ticket = await TicketModel.create({
         guildId: guild.id,

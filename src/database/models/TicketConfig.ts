@@ -29,8 +29,16 @@ export interface ITicketConfig extends Document {
   embedColor: string;
   embedImage: string | null;
   embedThumbnail: string | null;
+  embedFooter: string | null;
   threadNameTemplate: string;
   openMessageTemplate: string;
+  openMessageIsEmbed: boolean;
+  openMessageEmbedTitle: string;
+  openMessageEmbedColor: string;
+  openMessageEmbedImage: string | null;
+  openMessageEmbedThumbnail: string | null;
+  openMessageEmbedFooter: string | null;
+  openMessageEmbedAuthor: string | null;
   autoCloseHours: number;
   maxOpenTickets: number;
   nextTicketNumber: number;
@@ -58,11 +66,19 @@ const TicketConfigSchema = new Schema<ITicketConfig>(
     embedColor: { type: String, default: '#5865F2' },
     embedImage: { type: String, default: null },
     embedThumbnail: { type: String, default: null },
+    embedFooter: { type: String, default: null },
     threadNameTemplate: { type: String, default: '{type}-{username}' },
     openMessageTemplate: {
       type: String,
       default: 'Hello {user}! A staff member will be with you shortly.\n**Type:** {ticket_type}\n**Date:** {date}',
     },
+    openMessageIsEmbed: { type: Boolean, default: true },
+    openMessageEmbedTitle: { type: String, default: '🎫 Ticket #{ticket_number}' },
+    openMessageEmbedColor: { type: String, default: '#5865F2' },
+    openMessageEmbedImage: { type: String, default: null },
+    openMessageEmbedThumbnail: { type: String, default: null },
+    openMessageEmbedFooter: { type: String, default: null },
+    openMessageEmbedAuthor: { type: String, default: null },
     autoCloseHours: { type: Number, default: 48 },
     maxOpenTickets: { type: Number, default: 1 },
     nextTicketNumber: { type: Number, default: 1 },

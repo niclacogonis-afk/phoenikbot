@@ -9,6 +9,8 @@ import { GuildModel, getGuild } from '../database/models/Guild';
 import { TicketModel } from '../database/models/Ticket';
 import { TicketConfigModel, getTicketConfig } from '../database/models/TicketConfig';
 import { StatsModel } from '../database/models/Stats';
+import { AutoResponseModel } from '../database/models/AutoResponse';
+import { YouTubeConfigModel } from '../database/models/YouTubeConfig';
 import { invalidateGuildCache } from '../modules/cache/CacheManager';
 import { logger } from '../utils/logger';
 
@@ -277,10 +279,12 @@ export function createWebServer(client: BotClient) {
     const guild = client.guilds.cache.get(guildId);
     if (!guild) { res.redirect('/dashboard'); return; }
 
-    const [guildData, ticketConfig, stats] = await Promise.all([
+    const [guildData, ticketConfig, stats, autoResponses, ytConfigs] = await Promise.all([
       getGuild(guildId),
       getTicketConfig(guildId),
       StatsModel.find({ guildId }).sort({ date: -1 }).limit(7),
+      AutoResponseModel.find({ guildId }).sort({ createdAt: -1 }).limit(50),
+      YouTubeConfigModel.find({ guildId }),
     ]);
 
     const channels = guild.channels.cache
@@ -342,6 +346,9 @@ export function createWebServer(client: BotClient) {
             <a class="sidebar-item" data-tab="tab-roles" onclick="toggleTab('tab-roles')">👥 Roles</a>
             <a class="sidebar-item" data-tab="tab-automod" onclick="toggleTab('tab-automod')">🛡️ AutoMod</a>
             <div class="sidebar-section">Data</div>
+            <a class="sidebar-item" data-tab="tab-verify" onclick="toggleTab('tab-verify')">✅ Verification</a>
+            <a class="sidebar-item" data-tab="tab-autoresponse" onclick="toggleTab('tab-autoresponse')">🤖 Auto-response</a>
+            <a class="sidebar-item" data-tab="tab-youtube" onclick="toggleTab('tab-youtube')">📺 YouTube</a>
             <a class="sidebar-item" data-tab="tab-tickets-list" onclick="toggleTab('tab-tickets-list')">📝 Ticket List</a>
             <a class="sidebar-item" data-tab="tab-stats" onclick="toggleTab('tab-stats')">📊 Stats</a>
           </div>
@@ -417,86 +424,143 @@ export function createWebServer(client: BotClient) {
 
             <!-- TICKET TAB -->
             <div id="tab-ticket" class="tab-content">
+              <form method="POST" action="/api/guild/${guildId}/ticket/config">
               <div class="card">
-                <div class="card-title">🎫 Ticket Panel Embed</div>
-                <form method="POST" action="/api/guild/${guildId}/ticket/config">
+                <div class="card-title">🎫 Panel Embed (what users see)</div>
+                <div class="grid-2">
+                  <div class="form-group">
+                    <label>Embed Title</label>
+                    <input type="text" name="embedTitle" value="${escapeHtml(ticketConfig.embedTitle)}">
+                  </div>
+                  <div class="form-group">
+                    <label>Embed Color</label>
+                    <div style="display:flex;align-items:center;gap:8px">
+                      <input type="color" name="embedColor" value="${ticketConfig.embedColor}" style="width:50px;height:38px;padding:2px;cursor:pointer" id="embedColorPicker" onchange="document.getElementById('embedColorText').value=this.value;document.getElementById('embedColorPreview').style.background=this.value">
+                      <input type="text" name="embedColorText" id="embedColorText" value="${escapeHtml(ticketConfig.embedColor)}" style="flex:1" oninput="document.getElementById('embedColorPicker').value=this.value;document.getElementById('embedColorPreview').style.background=this.value">
+                      <span id="embedColorPreview" class="color-preview" style="background:${ticketConfig.embedColor}"></span>
+                    </div>
+                  </div>
+                </div>
+                <div class="form-group">
+                  <label>Embed Description</label>
+                  <textarea name="embedDescription">${escapeHtml(ticketConfig.embedDescription)}</textarea>
+                </div>
+                <div class="grid-2">
+                  <div class="form-group">
+                    <label>Image URL (optional, shown below description)</label>
+                    <input type="text" name="embedImage" value="${escapeHtml(ticketConfig.embedImage ?? '')}" placeholder="https://...">
+                  </div>
+                  <div class="form-group">
+                    <label>Thumbnail URL (optional, top-right corner)</label>
+                    <input type="text" name="embedThumbnail" value="${escapeHtml(ticketConfig.embedThumbnail ?? '')}" placeholder="https://...">
+                  </div>
+                </div>
+                <div class="form-group">
+                  <label>Footer Text (optional)</label>
+                  <input type="text" name="embedFooter" value="${escapeHtml(ticketConfig.embedFooter ?? '')}" placeholder="Your server name or custom text">
+                </div>
+              </div>
+
+              <div class="card">
+                <div class="card-title">🧵 Thread Settings</div>
+                <div class="grid-2">
+                  <div class="form-group">
+                    <label>Thread Name Template</label>
+                    <input type="text" name="threadNameTemplate" value="${escapeHtml(ticketConfig.threadNameTemplate)}" placeholder="{type}-{username}">
+                    <div style="font-size:.75rem;color:var(--text-muted);margin-top:4px">Vars: {type} {username} {id} {ticket_number}</div>
+                  </div>
+                  <div class="form-group">
+                    <label>Auto-close after inactivity (hours, 0 = disabled)</label>
+                    <input type="number" name="autoCloseHours" value="${ticketConfig.autoCloseHours}" min="0" max="168">
+                  </div>
+                </div>
+              </div>
+
+              <div class="card">
+                <div class="card-title">💬 Thread Opening Message</div>
+                <p style="color:var(--text-muted);font-size:.85rem;margin-bottom:12px">This is the first message sent inside the ticket thread when it's opened. Fully customizable.</p>
+                <div class="toggle-row" style="margin-bottom:12px">
+                  <div><div class="toggle-label">Send as Embed</div><div class="toggle-desc">If off, sends as plain text</div></div>
+                  <label class="switch">
+                    <input type="checkbox" name="openMessageIsEmbed" id="openMessageIsEmbed" ${ticketConfig.openMessageIsEmbed !== false ? 'checked' : ''} onchange="document.getElementById('embedFields').style.display=this.checked?'block':'none'">
+                    <span class="slider"></span>
+                  </label>
+                </div>
+                <div id="embedFields" style="display:${ticketConfig.openMessageIsEmbed !== false ? 'block' : 'none'}">
                   <div class="grid-2">
                     <div class="form-group">
                       <label>Embed Title</label>
-                      <input type="text" name="embedTitle" value="${escapeHtml(ticketConfig.embedTitle)}">
+                      <input type="text" name="openMessageEmbedTitle" value="${escapeHtml(ticketConfig.openMessageEmbedTitle ?? '🎫 Ticket #{ticket_number}')}" placeholder="🎫 Ticket #{ticket_number}">
                     </div>
                     <div class="form-group">
                       <label>Embed Color</label>
                       <div style="display:flex;align-items:center;gap:8px">
-                        <input type="color" name="embedColor" value="${ticketConfig.embedColor}" style="width:50px;height:38px;padding:2px;cursor:pointer" id="embedColorPicker" onchange="previewColor(this.value,'embedColorPreview')">
-                        <input type="text" name="embedColorText" value="${escapeHtml(ticketConfig.embedColor)}" style="flex:1" oninput="document.getElementById('embedColorPicker').value=this.value;previewColor(this.value,'embedColorPreview')">
-                        <span id="embedColorPreview" class="color-preview" style="background:${ticketConfig.embedColor}"></span>
+                        <input type="color" name="openMessageEmbedColor" value="${ticketConfig.openMessageEmbedColor ?? '#5865F2'}" style="width:50px;height:38px;padding:2px;cursor:pointer" id="omColorPicker" onchange="document.getElementById('omColorText').value=this.value;document.getElementById('omColorPreview').style.background=this.value">
+                        <input type="text" name="openMessageEmbedColorText" id="omColorText" value="${escapeHtml(ticketConfig.openMessageEmbedColor ?? '#5865F2')}" style="flex:1" oninput="document.getElementById('omColorPicker').value=this.value;document.getElementById('omColorPreview').style.background=this.value">
+                        <span id="omColorPreview" class="color-preview" style="background:${ticketConfig.openMessageEmbedColor ?? '#5865F2'}"></span>
                       </div>
                     </div>
                   </div>
                   <div class="form-group">
-                    <label>Embed Description</label>
-                    <textarea name="embedDescription">${escapeHtml(ticketConfig.embedDescription)}</textarea>
+                    <label>Author text (optional, small text above title)</label>
+                    <input type="text" name="openMessageEmbedAuthor" value="${escapeHtml(ticketConfig.openMessageEmbedAuthor ?? '')}" placeholder="Support Team">
                   </div>
                   <div class="grid-2">
                     <div class="form-group">
-                      <label>Image URL (optional)</label>
-                      <input type="text" name="embedImage" value="${escapeHtml(ticketConfig.embedImage ?? '')}">
+                      <label>Thumbnail URL (top-right image)</label>
+                      <input type="text" name="openMessageEmbedThumbnail" value="${escapeHtml(ticketConfig.openMessageEmbedThumbnail ?? '')}" placeholder="https://...">
                     </div>
                     <div class="form-group">
-                      <label>Thumbnail URL (optional)</label>
-                      <input type="text" name="embedThumbnail" value="${escapeHtml(ticketConfig.embedThumbnail ?? '')}">
-                    </div>
-                  </div>
-                  <div class="card-title" style="margin-top:16px">🔧 Thread Settings</div>
-                  <div class="grid-2">
-                    <div class="form-group">
-                      <label>Thread Name Template</label>
-                      <input type="text" name="threadNameTemplate" value="${escapeHtml(ticketConfig.threadNameTemplate)}" placeholder="{type}-{username}">
-                      <div style="font-size:.75rem;color:var(--text-muted);margin-top:4px">Variables: {type} {username} {id}</div>
-                    </div>
-                    <div class="form-group">
-                      <label>Auto-close after (hours, 0 = disabled)</label>
-                      <input type="number" name="autoCloseHours" value="${ticketConfig.autoCloseHours}" min="0" max="168">
+                      <label>Image URL (large image below description)</label>
+                      <input type="text" name="openMessageEmbedImage" value="${escapeHtml(ticketConfig.openMessageEmbedImage ?? '')}" placeholder="https://...">
                     </div>
                   </div>
                   <div class="form-group">
-                    <label>Opening Message Template</label>
-                    <textarea name="openMessageTemplate">${escapeHtml(ticketConfig.openMessageTemplate)}</textarea>
-                    <div style="font-size:.75rem;color:var(--text-muted);margin-top:4px">Variables: {user} {date} {ticket_type}</div>
+                    <label>Footer Text (optional)</label>
+                    <input type="text" name="openMessageEmbedFooter" value="${escapeHtml(ticketConfig.openMessageEmbedFooter ?? '')}" placeholder="Ticket will be closed after 48h of inactivity">
                   </div>
-                  <div class="card-title" style="margin-top:16px">📢 Staff & Logging</div>
-                  <div class="grid-2">
-                    <div class="form-group">
-                      <label>Staff Role</label>
-                      <select name="staffRole">
-                        <option value="">None</option>
-                        ${roles.map((r) => `<option value="${r.id}" ${ticketConfig.staffRoles.includes(r.id) ? 'selected' : ''}>${r.name}</option>`).join('')}
-                      </select>
-                    </div>
-                    <div class="form-group">
-                      <label>Log Channel</label>
-                      <select name="logChannel">
-                        <option value="">None</option>
-                        ${channels.map((c) => `<option value="${c.id}" ${ticketConfig.logChannelId === c.id ? 'selected' : ''}>#${c.name}</option>`).join('')}
-                      </select>
-                    </div>
-                  </div>
-                  <button type="submit" class="btn btn-primary">Save Ticket Config</button>
-                </form>
+                </div>
+                <div class="form-group">
+                  <label>Message Content / Embed Description</label>
+                  <textarea name="openMessageTemplate" style="min-height:120px">${escapeHtml(ticketConfig.openMessageTemplate)}</textarea>
+                  <div style="font-size:.75rem;color:var(--text-muted);margin-top:4px">Variables: {user} {username} {date} {ticket_type} {ticket_number}</div>
+                </div>
               </div>
 
               <div class="card">
+                <div class="card-title">📢 Staff & Logging</div>
+                <div class="grid-2">
+                  <div class="form-group">
+                    <label>Staff Role</label>
+                    <select name="staffRole">
+                      <option value="">None</option>
+                      ${roles.map((r) => `<option value="${r.id}" ${ticketConfig.staffRoles.includes(r.id) ? 'selected' : ''}>${r.name}</option>`).join('')}
+                    </select>
+                  </div>
+                  <div class="form-group">
+                    <label>Log Channel</label>
+                    <select name="logChannel">
+                      <option value="">None</option>
+                      ${channels.map((c) => `<option value="${c.id}" ${ticketConfig.logChannelId === c.id ? 'selected' : ''}>#${c.name}</option>`).join('')}
+                    </select>
+                  </div>
+                </div>
+                <button type="submit" class="btn btn-primary">💾 Save Ticket Config</button>
+              </div>
+              </form>
+
+              <div class="card">
                 <div class="card-title">📤 Send Ticket Panel</div>
-                <p style="color:var(--text-muted);font-size:.9rem;margin-bottom:16px">Send the ticket panel embed with buttons to a channel.</p>
+                <p style="color:var(--text-muted);font-size:.9rem;margin-bottom:16px">Send the ticket panel embed with buttons to a channel. Save your config above first!</p>
                 <form method="POST" action="/api/guild/${guildId}/ticket/panel">
                   <div class="form-group">
                     <label>Send to Channel</label>
                     <select name="channelId" required>
                       <option value="">Select a channel...</option>
-                      ${channels.map((c) => `<option value="${c.id}">#${c.name}</option>`).join('')}
+                      ${channels.map((c) => `<option value="${c.id}" ${ticketConfig.panelChannelId === c.id ? 'selected' : ''}>#${c.name}</option>`).join('')}
                     </select>
                   </div>
+                  ${ticketConfig.panelChannelId ? `<p style="font-size:.8rem;color:var(--text-muted);margin-bottom:12px">Currently in <strong>#${channels.find(c=>c.id===ticketConfig.panelChannelId)?.name ?? ticketConfig.panelChannelId}</strong></p>` : ''}
                   <button type="submit" class="btn btn-success">📤 Send Panel</button>
                 </form>
               </div>
@@ -627,6 +691,143 @@ export function createWebServer(client: BotClient) {
                   </div>
                   <button type="submit" class="btn btn-primary">Save Thresholds</button>
                 </form>
+              </div>
+            </div>
+
+            <!-- VERIFY TAB -->
+            <div id="tab-verify" class="tab-content">
+              <div class="card">
+                <div class="card-title">✅ Verification Settings</div>
+                <form method="POST" action="/api/guild/${guildId}/verify">
+                  <div class="form-group">
+                    <label>Verification Mode</label>
+                    <select name="verifyMode">
+                      <option value="">Disabled</option>
+                      <option value="button" ${guildData.verifyMode === 'button' ? 'selected' : ''}>Button Click (simplest)</option>
+                      <option value="captcha" ${guildData.verifyMode === 'captcha' ? 'selected' : ''}>Captcha (code in DM)</option>
+                      <option value="roblox" ${guildData.verifyMode === 'roblox' ? 'selected' : ''}>Roblox Account Link</option>
+                    </select>
+                  </div>
+                  <div class="form-group">
+                    <label>Role to give after verification</label>
+                    <select name="verifyRole">
+                      <option value="">None</option>
+                      ${roles.map((r) => `<option value="${r.id}" ${guildData.verifyRole === r.id ? 'selected' : ''}>${r.name}</option>`).join('')}
+                    </select>
+                  </div>
+                  <p style="color:var(--text-muted);font-size:.85rem;margin-bottom:12px">Use <strong>/verify setup</strong> in Discord to send the verification panel to a channel.</p>
+                  <button type="submit" class="btn btn-primary">💾 Save Verification</button>
+                </form>
+              </div>
+            </div>
+
+            <!-- AUTO-RESPONSE TAB -->
+            <div id="tab-autoresponse" class="tab-content">
+              <div class="card">
+                <div class="card-title">➕ Add Auto-response</div>
+                <form method="POST" action="/api/guild/${guildId}/autoresponse/add">
+                  <div class="form-group">
+                    <label>Trigger Keywords (comma-separated)</label>
+                    <input type="text" name="triggers" placeholder="verifica, verify, how to verify" required>
+                  </div>
+                  <div class="form-group">
+                    <label>Response Text</label>
+                    <textarea name="response" placeholder="To verify, click the button in #verify channel!" required></textarea>
+                  </div>
+                  <div class="grid-2">
+                    <div class="form-group">
+                      <label>Cooldown (seconds)</label>
+                      <input type="number" name="cooldownSeconds" value="30" min="5" max="3600">
+                    </div>
+                    <div style="display:flex;align-items:center;gap:12px;padding-top:22px">
+                      <label class="switch">
+                        <input type="checkbox" name="includeTicketButton">
+                        <span class="slider"></span>
+                      </label>
+                      <span style="font-size:.9rem">Add "Open Ticket" button</span>
+                    </div>
+                  </div>
+                  <button type="submit" class="btn btn-primary">➕ Add Auto-response</button>
+                </form>
+              </div>
+              <div class="card">
+                <div class="card-title">📋 Configured Auto-responses (${autoResponses.length})</div>
+                ${autoResponses.length === 0 ? '<p style="color:var(--text-muted)">No auto-responses configured yet.</p>' :
+                  '<table class="table"><thead><tr><th>Triggers</th><th>Response</th><th>Cooldown</th><th>Ticket Btn</th><th></th></tr></thead><tbody>' +
+                  autoResponses.map((ar) => `<tr>
+                    <td><code style="font-size:.8rem">${escapeHtml(ar.triggers.join(', '))}</code></td>
+                    <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(ar.response.slice(0, 80))}${ar.response.length > 80 ? '…' : ''}</td>
+                    <td>${ar.cooldownSeconds}s</td>
+                    <td>${ar.includeTicketButton ? '✅' : '—'}</td>
+                    <td><form method="POST" action="/api/guild/${guildId}/autoresponse/${(ar as any)._id}/delete" style="display:inline"><button class="btn btn-danger btn-sm" type="submit">Delete</button></form></td>
+                  </tr>`).join('') +
+                  '</tbody></table>'}
+              </div>
+            </div>
+
+            <!-- YOUTUBE TAB -->
+            <div id="tab-youtube" class="tab-content">
+              <div class="card">
+                <div class="card-title">➕ Add YouTube Notifier</div>
+                <form method="POST" action="/api/guild/${guildId}/youtube/add">
+                  <div class="grid-2">
+                    <div class="form-group">
+                      <label>YouTube Channel ID</label>
+                      <input type="text" name="youtubeChannelId" placeholder="UCxxxxxxxxxxxxxxxxxxxxxx" required>
+                      <div style="font-size:.75rem;color:var(--text-muted);margin-top:4px">Find it in the channel's URL or About page</div>
+                    </div>
+                    <div class="form-group">
+                      <label>YouTube Channel Name (label)</label>
+                      <input type="text" name="youtubeChannelName" placeholder="My Channel" required>
+                    </div>
+                  </div>
+                  <div class="grid-2">
+                    <div class="form-group">
+                      <label>Discord Notification Channel</label>
+                      <select name="discordChannelId" required>
+                        <option value="">Select channel...</option>
+                        ${channels.map((c) => `<option value="${c.id}">#${c.name}</option>`).join('')}
+                      </select>
+                    </div>
+                    <div class="form-group">
+                      <label>Ping Role (optional)</label>
+                      <select name="pingRoleId">
+                        <option value="">None</option>
+                        ${roles.map((r) => `<option value="${r.id}">${r.name}</option>`).join('')}
+                      </select>
+                    </div>
+                  </div>
+                  <div class="form-group">
+                    <label>Custom Message (optional, appears above embed)</label>
+                    <input type="text" name="customMessage" placeholder="🔔 New video from {channel}!">
+                  </div>
+                  <div style="display:flex;gap:24px;margin-bottom:16px">
+                    <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+                      <input type="checkbox" name="filterShorts" checked> Filter Shorts
+                    </label>
+                    <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+                      <input type="checkbox" name="filterLives"> Filter Live streams
+                    </label>
+                  </div>
+                  <button type="submit" class="btn btn-primary">➕ Add Notifier</button>
+                </form>
+              </div>
+              <div class="card">
+                <div class="card-title">📋 Configured YouTube Notifiers (${ytConfigs.length})</div>
+                ${ytConfigs.length === 0 ? '<p style="color:var(--text-muted)">No YouTube notifiers configured.</p>' :
+                  '<table class="table"><thead><tr><th>Channel</th><th>Discord Channel</th><th>Ping Role</th><th>Shorts</th><th></th></tr></thead><tbody>' +
+                  ytConfigs.map((yt) => {
+                    const dcName = channels.find(c=>c.id===yt.discordChannelId)?.name;
+                    const pingRole = roles.find(r=>r.id===yt.pingRoleId);
+                    return `<tr>
+                      <td><strong>${escapeHtml(yt.youtubeChannelName)}</strong></td>
+                      <td>${dcName ? '#'+dcName : yt.discordChannelId}</td>
+                      <td>${pingRole ? '@'+pingRole.name : '—'}</td>
+                      <td>${yt.filterShorts ? 'filtered' : 'allowed'}</td>
+                      <td><form method="POST" action="/api/guild/${guildId}/youtube/${(yt as any)._id}/delete" style="display:inline"><button class="btn btn-danger btn-sm" type="submit">Delete</button></form></td>
+                    </tr>`;
+                  }).join('') +
+                  '</tbody></table>'}
               </div>
             </div>
 
@@ -782,17 +983,30 @@ export function createWebServer(client: BotClient) {
     const guildId = req.params.id;
     if (!isGuildAdmin(req, guildId)) { res.status(403).json({ error: 'Forbidden' }); return; }
     const b = req.body;
-    const color = b.embedColorText || b.embedColor || '#5865F2';
+    const normalizeColor = (c: string) => {
+      if (!c) return '#5865F2';
+      return c.startsWith('#') ? c : `#${c}`;
+    };
+    const embedColor = normalizeColor(b.embedColorText || b.embedColor);
+    const omEmbedColor = normalizeColor(b.openMessageEmbedColorText || b.openMessageEmbedColor);
     const staffRole = b.staffRole ? [b.staffRole] : [];
     await TicketConfigModel.findOneAndUpdate({ guildId }, {
       embedTitle: b.embedTitle || '🎫 Support Tickets',
       embedDescription: b.embedDescription || 'Click a button to open a ticket.',
-      embedColor: color.startsWith('#') ? color : `#${color}`,
+      embedColor,
       embedImage: b.embedImage || null,
       embedThumbnail: b.embedThumbnail || null,
+      embedFooter: b.embedFooter || null,
       threadNameTemplate: b.threadNameTemplate || '{type}-{username}',
       openMessageTemplate: b.openMessageTemplate || 'Hello {user}! Staff will be with you shortly.',
       autoCloseHours: parseInt(b.autoCloseHours) || 48,
+      openMessageIsEmbed: 'openMessageIsEmbed' in b,
+      openMessageEmbedTitle: b.openMessageEmbedTitle || '🎫 Ticket #{ticket_number}',
+      openMessageEmbedColor: omEmbedColor,
+      openMessageEmbedImage: b.openMessageEmbedImage || null,
+      openMessageEmbedThumbnail: b.openMessageEmbedThumbnail || null,
+      openMessageEmbedFooter: b.openMessageEmbedFooter || null,
+      openMessageEmbedAuthor: b.openMessageEmbedAuthor || null,
       staffRoles: staffRole,
       logChannelId: b.logChannel || null,
     }, { upsert: true });
@@ -822,6 +1036,7 @@ export function createWebServer(client: BotClient) {
 
     if (ticketConfig.embedImage) embed.setImage(ticketConfig.embedImage);
     if (ticketConfig.embedThumbnail) embed.setThumbnail(ticketConfig.embedThumbnail);
+    if (ticketConfig.embedFooter) embed.setFooter({ text: ticketConfig.embedFooter });
 
     const buttons = ticketConfig.buttons.map((b) =>
       new ButtonBuilder()
@@ -872,6 +1087,75 @@ export function createWebServer(client: BotClient) {
     await GuildModel.findOneAndUpdate({ guildId }, { [`modules.${module}`]: enabled === 'true' }, { upsert: true });
     invalidateGuildCache(guildId);
     res.redirect(`/guild/${guildId}`);
+  });
+
+  app.post('/api/guild/:id/verify', requireAuth, async (req, res) => {
+    const guildId = req.params.id;
+    if (!isGuildAdmin(req, guildId)) { res.status(403).json({ error: 'Forbidden' }); return; }
+    const b = req.body;
+    await GuildModel.findOneAndUpdate({ guildId }, {
+      verifyMode: b.verifyMode || null,
+      verifyRole: b.verifyRole || null,
+    }, { upsert: true });
+    invalidateGuildCache(guildId);
+    res.redirect(`/guild/${guildId}?saved=1`);
+  });
+
+  app.post('/api/guild/:id/autoresponse/add', requireAuth, async (req, res) => {
+    const guildId = req.params.id;
+    if (!isGuildAdmin(req, guildId)) { res.status(403).json({ error: 'Forbidden' }); return; }
+    const b = req.body;
+    const count = await AutoResponseModel.countDocuments({ guildId });
+    if (count >= 50) { res.redirect(`/guild/${guildId}?error=Max+50+auto-responses`); return; }
+    const triggers = (b.triggers || '').split(',').map((t: string) => t.trim().toLowerCase()).filter(Boolean);
+    if (!triggers.length || !b.response) { res.redirect(`/guild/${guildId}?error=Missing+fields`); return; }
+    await AutoResponseModel.create({
+      guildId,
+      triggers,
+      response: b.response,
+      includeTicketButton: 'includeTicketButton' in b,
+      cooldownSeconds: parseInt(b.cooldownSeconds) || 30,
+    });
+    res.redirect(`/guild/${guildId}?saved=1`);
+  });
+
+  app.post('/api/guild/:id/autoresponse/:arId/delete', requireAuth, async (req, res) => {
+    const guildId = req.params.id;
+    if (!isGuildAdmin(req, guildId)) { res.status(403).json({ error: 'Forbidden' }); return; }
+    await AutoResponseModel.findOneAndDelete({ _id: req.params.arId, guildId });
+    res.redirect(`/guild/${guildId}?saved=1`);
+  });
+
+  app.post('/api/guild/:id/youtube/add', requireAuth, async (req, res) => {
+    const guildId = req.params.id;
+    if (!isGuildAdmin(req, guildId)) { res.status(403).json({ error: 'Forbidden' }); return; }
+    const b = req.body;
+    if (!b.youtubeChannelId || !b.discordChannelId || !b.youtubeChannelName) {
+      res.redirect(`/guild/${guildId}?error=Missing+fields`); return;
+    }
+    try {
+      await YouTubeConfigModel.create({
+        guildId,
+        channelId: b.discordChannelId,
+        youtubeChannelId: b.youtubeChannelId.trim(),
+        youtubeChannelName: b.youtubeChannelName.trim(),
+        discordChannelId: b.discordChannelId,
+        pingRoleId: b.pingRoleId || null,
+        customMessage: b.customMessage || null,
+        filterShorts: 'filterShorts' in b,
+        filterLives: 'filterLives' in b,
+      });
+      res.redirect(`/guild/${guildId}?saved=1`);
+    } catch {
+      res.redirect(`/guild/${guildId}?error=Already+configured+for+this+YouTube+channel`);
+    }
+  });
+
+  app.post('/api/guild/:id/youtube/:ytId/delete', requireAuth, async (req, res) => {
+    const guildId = req.params.id;
+    if (!isGuildAdmin(req, guildId)) { res.status(403).json({ error: 'Forbidden' }); return; }
+    await YouTubeConfigModel.findOneAndDelete({ _id: req.params.ytId, guildId });
+    res.redirect(`/guild/${guildId}?saved=1`);
   });
 
   return app;
