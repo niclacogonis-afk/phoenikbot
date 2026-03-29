@@ -25,9 +25,7 @@ const event: BotEvent = {
       await AIModeration.analyze(message).catch(() => null);
     }
 
-    if (await isModuleEnabled(guildId, 'moderation')) {
-      await checkAutoResponse(message).catch(() => null);
-    }
+    await checkAutoResponse(message).catch(() => null);
   },
 };
 
@@ -48,6 +46,13 @@ async function checkAutoResponse(message: Message) {
     ar.lastTriggered.set(channelKey, Date.now());
     await ar.save();
 
+    const { ButtonBuilder, ButtonStyle, ActionRowBuilder } = await import('discord.js');
+    const components = ar.includeTicketButton
+      ? [new ActionRowBuilder<InstanceType<typeof ButtonBuilder>>().addComponents(
+          new ButtonBuilder().setCustomId('ticket:open:support').setLabel('Open Ticket').setEmoji('🎫').setStyle(ButtonStyle.Primary)
+        )]
+      : [];
+
     if (ar.isEmbed && ar.embedData) {
       const { EmbedBuilder } = await import('discord.js');
       const embed = new EmbedBuilder();
@@ -55,9 +60,9 @@ async function checkAutoResponse(message: Message) {
       if (d['title']) embed.setTitle(d['title']);
       if (d['description']) embed.setDescription(d['description']);
       if (d['color']) embed.setColor(d['color'] as `#${string}`);
-      await message.reply({ embeds: [embed] });
+      await message.reply({ embeds: [embed], components });
     } else {
-      await message.reply(ar.response);
+      await message.reply({ content: ar.response, components });
     }
     break;
   }

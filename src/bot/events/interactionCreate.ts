@@ -5,7 +5,6 @@ import {
   StringSelectMenuInteraction,
   ModalSubmitInteraction,
   InteractionType,
-  ComponentType,
 } from 'discord.js';
 import { BotEvent } from '../../types';
 import { BotClient } from '../client';
@@ -16,6 +15,11 @@ import { checkCooldown } from '../../utils/rateLimit';
 const event: BotEvent = {
   name: 'interactionCreate',
   async execute(interaction: Interaction, client: BotClient) {
+    if (!client || !client.commands) {
+      logger.error('Client not initialized properly in interactionCreate');
+      return;
+    }
+
     if (interaction.isChatInputCommand()) {
       await handleCommand(interaction, client);
     } else if (interaction.isButton()) {
@@ -28,16 +32,27 @@ const event: BotEvent = {
   },
 };
 
+async function safeReply(
+  interaction: ChatInputCommandInteraction | ButtonInteraction | StringSelectMenuInteraction | ModalSubmitInteraction,
+  options: Parameters<typeof interaction.reply>[0]
+) {
+  try {
+    if (interaction.replied || interaction.deferred) {
+      await interaction.followUp({ ...options as any, ephemeral: true }).catch(() => null);
+    } else {
+      await interaction.reply({ ...options as any, ephemeral: true }).catch(() => null);
+    }
+  } catch { }
+}
+
 async function handleCommand(interaction: ChatInputCommandInteraction, client: BotClient) {
   const command = client.commands.get(interaction.commandName);
   if (!command) return;
 
-  if (command.ownerOnly && !interaction.client.application?.owner?.id) return;
-
   const cooldownMs = (command.cooldown ?? 3) * 1000;
   const remaining = checkCooldown(command.data.name, interaction.user.id, cooldownMs);
   if (remaining > 0) {
-    await interaction.reply({
+    await safeReply(interaction, {
       embeds: [errorEmbed('Cooldown', `Please wait **${(remaining / 1000).toFixed(1)}s** before using this command again.`)],
       ephemeral: true,
     });
@@ -48,12 +63,10 @@ async function handleCommand(interaction: ChatInputCommandInteraction, client: B
     await command.execute(interaction, client);
   } catch (error) {
     logger.error(`Command error [${interaction.commandName}]:`, error instanceof Error ? error : new Error(String(error)));
-    const errEmbed = errorEmbed('Error', 'An unexpected error occurred. Please try again later.');
-    if (interaction.replied || interaction.deferred) {
-      await interaction.followUp({ embeds: [errEmbed], ephemeral: true }).catch(() => null);
-    } else {
-      await interaction.reply({ embeds: [errEmbed], ephemeral: true }).catch(() => null);
-    }
+    await safeReply(interaction, {
+      embeds: [errorEmbed('Error', 'An unexpected error occurred. Please try again later.')],
+      ephemeral: true,
+    });
   }
 }
 
@@ -68,12 +81,10 @@ async function handleButton(interaction: ButtonInteraction, client: BotClient) {
     await handler.execute(interaction, client);
   } catch (error) {
     logger.error(`Button error [${customId}]:`, error instanceof Error ? error : new Error(String(error)));
-    const errEmbed = errorEmbed('Error', 'Something went wrong.');
-    if (interaction.replied || interaction.deferred) {
-      await interaction.followUp({ embeds: [errEmbed], ephemeral: true }).catch(() => null);
-    } else {
-      await interaction.reply({ embeds: [errEmbed], ephemeral: true }).catch(() => null);
-    }
+    await safeReply(interaction, {
+      embeds: [errorEmbed('Error', 'Something went wrong. Please try again.')],
+      ephemeral: true,
+    });
   }
 }
 
@@ -88,12 +99,10 @@ async function handleSelectMenu(interaction: StringSelectMenuInteraction, client
     await handler.execute(interaction, client);
   } catch (error) {
     logger.error(`SelectMenu error [${customId}]:`, error instanceof Error ? error : new Error(String(error)));
-    const errEmbed = errorEmbed('Error', 'Something went wrong.');
-    if (interaction.replied || interaction.deferred) {
-      await interaction.followUp({ embeds: [errEmbed], ephemeral: true }).catch(() => null);
-    } else {
-      await interaction.reply({ embeds: [errEmbed], ephemeral: true }).catch(() => null);
-    }
+    await safeReply(interaction, {
+      embeds: [errorEmbed('Error', 'Something went wrong. Please try again.')],
+      ephemeral: true,
+    });
   }
 }
 
@@ -108,12 +117,10 @@ async function handleModal(interaction: ModalSubmitInteraction, client: BotClien
     await handler.execute(interaction, client);
   } catch (error) {
     logger.error(`Modal error [${customId}]:`, error instanceof Error ? error : new Error(String(error)));
-    const errEmbed = errorEmbed('Error', 'Something went wrong.');
-    if (interaction.replied || interaction.deferred) {
-      await interaction.followUp({ embeds: [errEmbed], ephemeral: true }).catch(() => null);
-    } else {
-      await interaction.reply({ embeds: [errEmbed], ephemeral: true }).catch(() => null);
-    }
+    await safeReply(interaction, {
+      embeds: [errorEmbed('Error', 'Something went wrong. Please try again.')],
+      ephemeral: true,
+    });
   }
 }
 

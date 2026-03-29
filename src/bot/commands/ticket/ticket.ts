@@ -97,7 +97,14 @@ const command: Command = {
         return;
       }
 
-      const msg = await (targetChannel as import('discord.js').TextChannel).send({ embeds: [embed], components: rows });
+      let msg;
+      try {
+        msg = await (targetChannel as import('discord.js').TextChannel).send({ embeds: [embed], components: rows });
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        await interaction.editReply({ embeds: [errorEmbed('Send Failed', `Could not send panel to ${channel}. Make sure the bot has **Send Messages** and **Embed Links** permissions.\n\`${errMsg}\``)] });
+        return;
+      }
 
       config.panelChannelId = channel.id;
       config.panelMessageId = msg.id;
