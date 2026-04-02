@@ -5,6 +5,8 @@ import { incrementDailyStat } from '../../database/models/Stats';
 import { sendLog } from '../../modules/logging/LogManager';
 import { GlobalBanModel } from '../../database/models/GlobalBan';
 import { getUser } from '../../database/models/User';
+import { applyRaidJoinAccountGate } from '../../modules/security/JoinGate';
+import { WelcomeManager } from '../../modules/welcome/WelcomeManager';
 
 const event: BotEvent = {
   name: 'guildMemberAdd',
@@ -18,7 +20,11 @@ const event: BotEvent = {
     if (await isModuleEnabled(guildId, 'antirAid')) {
       const { RaidDetector } = await import('../../modules/antirAid/RaidDetector');
       await RaidDetector.onMemberJoin(member).catch(() => null);
+      await applyRaidJoinAccountGate(member).catch(() => null);
     }
+
+    // Welcome message and auto-role
+    await WelcomeManager.onMemberJoin(member).catch(() => null);
 
     if (await isModuleEnabled(guildId, 'logging')) {
       const accountAge = Date.now() - member.user.createdTimestamp;

@@ -1,4 +1,4 @@
-import { Guild, User, PartialUser, GuildChannel, AuditLogEvent, PermissionFlagsBits, EmbedBuilder } from 'discord.js';
+import { Guild, User, PartialUser, GuildChannel, Role, AuditLogEvent, PermissionFlagsBits, EmbedBuilder } from 'discord.js';
 import { getGuild } from '../../database/models/Guild';
 import { getCachedGuild } from '../cache/CacheManager';
 import { logger } from '../../utils/logger';
@@ -34,6 +34,24 @@ export class AntiNuke {
       }
     } catch (err) {
       logger.debug('AntiNuke channel delete error:', err instanceof Error ? err : new Error(String(err)));
+    }
+  }
+
+  static async onRoleDelete(role: Role): Promise<void> {
+    try {
+      const audit = await role.guild.fetchAuditLogs({ type: AuditLogEvent.RoleDelete, limit: 1 });
+      const entry = audit.entries.first();
+      if (!entry || !entry.executor) return;
+
+      const guildConfig = await getGuild(role.guild.id);
+      const threshold = guildConfig.autoModThresholds.nukeRoleDeletes;
+      const count = trackAction(role.guild.id, entry.executor.id, 'role_delete');
+
+      if (count >= threshold) {
+        await AntiNuke.punishUser(role.guild, entry.executor as User);
+      }
+    } catch (err) {
+      logger.debug('AntiNuke role delete error:', err instanceof Error ? err : new Error(String(err)));
     }
   }
 

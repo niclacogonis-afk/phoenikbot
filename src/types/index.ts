@@ -60,7 +60,8 @@ export type ModuleName =
   | 'schedule'
   | 'backup'
   | 'minigames'
-  | 'moderation';
+  | 'moderation'
+  | 'automation';
 
 export interface GuildModules {
   ticket: boolean;
@@ -81,6 +82,7 @@ export interface GuildModules {
   backup: boolean;
   minigames: boolean;
   moderation: boolean;
+  automation: boolean;
 }
 
 export interface CachedGuild {

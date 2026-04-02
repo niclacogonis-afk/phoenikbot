@@ -1,71 +1,105 @@
-import { Message } from 'discord.js';
+import { Message, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
 import { BotEvent } from '../../types';
-import { isModuleEnabled } from '../../modules/cache/CacheManager';
-import { incrementDailyStat } from '../../database/models/Stats';
+import { LevelManager } from '../../modules/leveling/LevelManager';
+import { EconomyManager } from '../../modules/economy/EconomyManager';
+import { ChallengeManager } from '../../modules/challenges/ChallengeManager';
 import { AutoResponseModel } from '../../database/models/AutoResponse';
 
 const event: BotEvent = {
   name: 'messageCreate',
   async execute(message: Message) {
-    if (message.author.bot || !message.guild) return;
+    if (message.author.bot) return;
+    if (!message.guild) return;
 
-    const guildId = message.guild.id;
+    try { await LevelManager.onMessage(message); } catch { }
+    try { await EconomyManager.onMessage(message); } catch { }
+    try { await ChallengeManager.onMessage(message); } catch { }
 
-    if (await isModuleEnabled(guildId, 'stats')) {
-      await incrementDailyStat(guildId, 'messages').catch(() => null);
-    }
+    // Check auto-responses
+    try {
+      const content = message.content.toLowerCase().trim();
+      if (!content) return;
 
-    if (await isModuleEnabled(guildId, 'antilink')) {
-      const { AntiLink } = await import('../../modules/antilink/AntiLink');
-      await AntiLink.check(message).catch(() => null);
-    }
+      const responses = await AutoResponseModel.find({ guildId: message.guild.id });
+      if (!responses.length) return;
 
-    if (await isModuleEnabled(guildId, 'ai')) {
-      const { AIModeration } = await import('../../modules/ai/AIModeration');
-      await AIModeration.analyze(message).catch(() => null);
-    }
+      for (const ar of responses) {
+        const triggered = ar.triggers.some(trigger => {
+          const t = trigger.toLowerCase();
+          return content === t || content.includes(t);
+        });
 
-    await checkAutoResponse(message).catch(() => null);
+        if (!triggered) continue;
+
+        // Check cooldown
+        const lastTrigger = ar.lastTriggered?.get(message.author.id) ?? 0;
+        const cooldownMs = (ar.cooldownSeconds || 30) * 1000;
+        if (Date.now() - lastTrigger < cooldownMs) continue;
+
+        // Update cooldown
+        if (!ar.lastTriggered) ar.lastTriggered = new Map();
+        ar.lastTriggered.set(message.author.id, Date.now());
+        await ar.save();
+
+        // Send response
+        if (ar.isEmbed && ar.embedData) {
+          const embed = new EmbedBuilder();
+          if (ar.embedData.title) embed.setTitle(ar.embedData.title);
+          if (ar.embedData.description) embed.setDescription(ar.embedData.description);
+          if (ar.embedData.color) embed.setColor(ar.embedData.color as any);
+          if (ar.embedData.footer) embed.setFooter({ text: ar.embedData.footer });
+          if (ar.embedData.thumbnail) embed.setThumbnail(ar.embedData.thumbnail);
+          if (ar.embedData.image) embed.setImage(ar.embedData.image);
+
+          const components: ActionRowBuilder<ButtonBuilder>[] = [];
+          if (ar.includeTicketButton) {
+            const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+              new ButtonBuilder()
+                .setCustomId('ticket:create')
+                .setLabel('Open Ticket')
+                .setStyle(ButtonStyle.Primary)
+                .setEmoji('🎫')
+            );
+            components.push(row);
+          }
+
+          if ('send' in message.channel) {
+            await message.channel.send({
+              embeds: [embed],
+              components: components.length ? components : undefined,
+            });
+          }
+        } else {
+          let text = ar.response
+            .replace(/{user}/g, `<@${message.author.id}>`)
+            .replace(/{username}/g, message.author.username)
+            .replace(/{server}/g, message.guild.name)
+            .replace(/{channel}/g, `<#${message.channel.id}>`);
+
+          const components: ActionRowBuilder<ButtonBuilder>[] = [];
+          if (ar.includeTicketButton) {
+            const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+              new ButtonBuilder()
+                .setCustomId('ticket:create')
+                .setLabel('Open Ticket')
+                .setStyle(ButtonStyle.Primary)
+                .setEmoji('🎫')
+            );
+            components.push(row);
+          }
+
+          if ('send' in message.channel) {
+            await message.channel.send({
+              content: text,
+              components: components.length ? components : undefined,
+            });
+          }
+        }
+
+        break; // Only trigger one response per message
+      }
+    } catch { }
   },
 };
-
-async function checkAutoResponse(message: Message) {
-  if (!message.guild) return;
-  const guildId = message.guild.id;
-  const content = message.content.toLowerCase();
-
-  const responses = await AutoResponseModel.find({ guildId });
-  for (const ar of responses) {
-    const triggered = ar.triggers.some((t) => content.includes(t.toLowerCase()));
-    if (!triggered) continue;
-
-    const channelKey = `${guildId}:${message.channel.id}`;
-    const lastTime = ar.lastTriggered.get(channelKey) ?? 0;
-    if (Date.now() - lastTime < ar.cooldownSeconds * 1000) continue;
-
-    ar.lastTriggered.set(channelKey, Date.now());
-    await ar.save();
-
-    const { ButtonBuilder, ButtonStyle, ActionRowBuilder } = await import('discord.js');
-    const components = ar.includeTicketButton
-      ? [new ActionRowBuilder<InstanceType<typeof ButtonBuilder>>().addComponents(
-          new ButtonBuilder().setCustomId('ticket:open:support').setLabel('Open Ticket').setEmoji('🎫').setStyle(ButtonStyle.Primary)
-        )]
-      : [];
-
-    if (ar.isEmbed && ar.embedData) {
-      const { EmbedBuilder } = await import('discord.js');
-      const embed = new EmbedBuilder();
-      const d = ar.embedData as Record<string, string>;
-      if (d['title']) embed.setTitle(d['title']);
-      if (d['description']) embed.setDescription(d['description']);
-      if (d['color']) embed.setColor(d['color'] as `#${string}`);
-      await message.reply({ embeds: [embed], components });
-    } else {
-      await message.reply({ content: ar.response, components });
-    }
-    break;
-  }
-}
 
 export default event;

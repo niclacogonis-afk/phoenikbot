@@ -2,10 +2,11 @@ import {
   Guild, GuildMember, TextChannel, ThreadChannel,
   EmbedBuilder, ButtonBuilder, ButtonStyle, ActionRowBuilder,
   AttachmentBuilder, StringSelectMenuBuilder, StringSelectMenuOptionBuilder,
-  ChannelType,
+  ChannelType, PermissionFlagsBits,
 } from 'discord.js';
 import { TicketModel } from '../../database/models/Ticket';
 import { getTicketConfig, TicketConfigModel } from '../../database/models/TicketConfig';
+import { getGuild } from '../../database/models/Guild';
 import { TranscriptBuilder } from './TranscriptBuilder';
 import { sendLog } from '../logging/LogManager';
 import { incrementStat } from '../../database/models/StaffStats';
@@ -13,6 +14,8 @@ import { incrementDailyStat } from '../../database/models/Stats';
 import { errorEmbed, successEmbed } from '../../utils/embed';
 import { formatDate } from '../../utils/formatters';
 import { logger } from '../../utils/logger';
+import { writeAudit } from '../audit/writeAudit';
+import { safeEmbedMediaUrl } from '../../utils/embedUrl';
 
 export class TicketManager {
   static async openTicket(guild: Guild, member: GuildMember, type: string): Promise<string | null> {
@@ -49,37 +52,79 @@ export class TicketManager {
         return 'Ticket panel channel not found. Please reconfigure the ticket system via the dashboard or `/ticket panel`.';
       }
 
-      let thread: ThreadChannel | null = null;
+      // Check if ticket category is configured
+      const guildData = await getGuild(guild.id);
+      const ticketCategoryId = (guildData as any).ticketCategory as string | undefined;
 
-      try {
-        thread = await panelChannel.threads.create({
-          name: threadName,
-          type: ChannelType.PrivateThread,
-          invitable: false,
-          reason: `Ticket #${ticketNumber} - ${type}`,
-        });
-      } catch {
+      let ticketChannel: TextChannel | ThreadChannel | null = null;
+
+      if (ticketCategoryId) {
+        // Create a text channel in the specified category
         try {
-          thread = await panelChannel.threads.create({
-            name: threadName,
-            type: ChannelType.PublicThread,
-            reason: `Ticket #${ticketNumber} - ${type}`,
-          });
+          const category = guild.channels.cache.get(ticketCategoryId) || await guild.channels.fetch(ticketCategoryId).catch(() => null);
+          if (category && category.type === ChannelType.GuildCategory) {
+            const channel = await guild.channels.create({
+              name: threadName.toLowerCase().replace(/[^a-z0-9-]/g, '-').substring(0, 100),
+              type: ChannelType.GuildText,
+              parent: ticketCategoryId,
+              permissionOverwrites: [
+                { id: guild.id, deny: [PermissionFlagsBits.ViewChannel] },
+                { id: member.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] },
+              ],
+              reason: `Ticket #${ticketNumber} - ${type}`,
+            });
+            ticketChannel = channel;
+          }
         } catch (err) {
-          logger.error('Failed to create ticket thread:', err instanceof Error ? err : new Error(String(err)));
-          return 'Failed to create ticket thread. Make sure the bot has **Manage Threads** permission.';
+          logger.error('Failed to create ticket channel in category:', err instanceof Error ? err : new Error(String(err)));
         }
       }
 
-      if (!thread) return 'Failed to create ticket thread.';
+      // Fallback to thread if category not set or failed
+      if (!ticketChannel) {
+        try {
+          ticketChannel = await panelChannel.threads.create({
+            name: threadName,
+            type: ChannelType.PrivateThread,
+            invitable: false,
+            reason: `Ticket #${ticketNumber} - ${type}`,
+          });
+        } catch {
+          try {
+            ticketChannel = await panelChannel.threads.create({
+              name: threadName,
+              type: ChannelType.PublicThread,
+              reason: `Ticket #${ticketNumber} - ${type}`,
+            });
+          } catch (err) {
+            logger.error('Failed to create ticket thread:', err instanceof Error ? err : new Error(String(err)));
+            return 'Failed to create ticket. Make sure the bot has **Manage Channels** and **Manage Threads** permissions.';
+          }
+        }
+      }
 
-      await thread.members.add(member.user.id).catch(() => null);
+      if (!ticketChannel) return 'Failed to create ticket.';
 
-      for (const roleId of config.staffRoles) {
-        const role = guild.roles.cache.get(roleId);
-        if (role) {
-          for (const [, m] of role.members) {
-            await thread.members.add(m.user.id).catch(() => null);
+      // Add permissions for staff roles
+      if (ticketChannel instanceof TextChannel) {
+        for (const roleId of config.staffRoles) {
+          await ticketChannel.permissionOverwrites.create(roleId, {
+            ViewChannel: true,
+            SendMessages: true,
+          }).catch(() => null);
+        }
+      } else {
+        await ticketChannel.members.add(member.user.id).catch(() => null);
+      }
+
+      // Add staff role members (only for threads - channels use permission overwrites)
+      if (!(ticketChannel instanceof TextChannel)) {
+        for (const roleId of config.staffRoles) {
+          const role = guild.roles.cache.get(roleId);
+          if (role) {
+            for (const [, m] of role.members) {
+              await ticketChannel.members.add(m.user.id).catch(() => null);
+            }
           }
         }
       }
@@ -101,15 +146,15 @@ export class TicketManager {
       const staffPing = config.staffRoles.map((r) => `<@&${r}>`).join(' ');
 
       const row1 = new ActionRowBuilder<ButtonBuilder>().addComponents(
-        new ButtonBuilder().setCustomId(`ticket:close:${thread.id}`).setLabel('Close').setEmoji('🔒').setStyle(ButtonStyle.Danger),
-        new ButtonBuilder().setCustomId(`ticket:claim:${thread.id}`).setLabel('Claim').setEmoji('👤').setStyle(ButtonStyle.Primary),
-        new ButtonBuilder().setCustomId(`ticket:transfer:${thread.id}`).setLabel('Transfer').setEmoji('🔄').setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId(`ticket:delete:${thread.id}`).setLabel('Delete').setEmoji('🗑️').setStyle(ButtonStyle.Danger),
+        new ButtonBuilder().setCustomId(`ticket:close:${ticketChannel.id}`).setLabel('Close').setEmoji('🔒').setStyle(ButtonStyle.Danger),
+        new ButtonBuilder().setCustomId(`ticket:claim:${ticketChannel.id}`).setLabel('Claim').setEmoji('👤').setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId(`ticket:transfer:${ticketChannel.id}`).setLabel('Transfer').setEmoji('🔄').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(`ticket:delete:${ticketChannel.id}`).setLabel('Delete').setEmoji('🗑️').setStyle(ButtonStyle.Danger),
       );
 
       const priorityMenu = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
         new StringSelectMenuBuilder()
-          .setCustomId(`ticket:priority:${thread.id}`)
+          .setCustomId(`ticket:priority:${ticketChannel.id}`)
           .setPlaceholder('Set Priority')
           .addOptions(
             new StringSelectMenuOptionBuilder().setLabel('Low').setValue('low').setEmoji('🟢'),
@@ -134,12 +179,14 @@ export class TicketManager {
           )
           .setTimestamp();
 
-        if (config.openMessageEmbedThumbnail) ticketEmbed.setThumbnail(config.openMessageEmbedThumbnail);
-        if (config.openMessageEmbedImage) ticketEmbed.setImage(config.openMessageEmbedImage);
+        const omThumb = safeEmbedMediaUrl(config.openMessageEmbedThumbnail);
+        if (omThumb) ticketEmbed.setThumbnail(omThumb);
+        const omImg = safeEmbedMediaUrl(config.openMessageEmbedImage);
+        if (omImg) ticketEmbed.setImage(omImg);
         if (config.openMessageEmbedFooter) ticketEmbed.setFooter({ text: resolveTemplate(config.openMessageEmbedFooter) });
         if (config.openMessageEmbedAuthor) ticketEmbed.setAuthor({ name: resolveTemplate(config.openMessageEmbedAuthor) });
 
-        await thread.send({
+        await ticketChannel.send({
           content: staffPing || undefined,
           embeds: [ticketEmbed],
           components: [row1, priorityMenu],
@@ -147,7 +194,7 @@ export class TicketManager {
           logger.error('Failed to send ticket initial message:', err instanceof Error ? err : new Error(String(err)));
         });
       } else {
-        await thread.send({
+        await ticketChannel.send({
           content: (staffPing ? staffPing + '\n' : '') + openMsgText,
           components: [row1, priorityMenu],
         }).catch((err) => {
@@ -158,7 +205,7 @@ export class TicketManager {
       const ticket = await TicketModel.create({
         guildId: guild.id,
         channelId: panelChannel.id,
-        threadId: thread.id,
+        threadId: ticketChannel.id,
         userId: member.user.id,
         ticketNumber,
         type,
@@ -173,11 +220,19 @@ export class TicketManager {
         .addFields(
           { name: 'User', value: `${member.user.username} (${member.user.id})`, inline: true },
           { name: 'Type', value: type, inline: true },
-          { name: 'Thread', value: `<#${thread.id}>`, inline: true },
+          { name: 'Channel', value: `<#${ticketChannel.id}>`, inline: true },
           { name: 'Ticket #', value: String(ticketNumber), inline: true }
         )
         .setTimestamp();
       await sendLog(guild, logEmbed);
+
+      await writeAudit({
+        guildId: guild.id,
+        action: 'ticket.open',
+        actorId: member.user.id,
+        targetId: ticketChannel.id,
+        detail: `type:${type} · #${ticketNumber}`,
+      });
 
       return null;
     } catch (err) {
@@ -199,6 +254,14 @@ export class TicketManager {
     ticket.transcriptHtml = htmlTranscript;
     ticket.transcriptTxt = txtTranscript;
     await ticket.save();
+
+    await writeAudit({
+      guildId: guild.id,
+      action: 'ticket.close',
+      actorId: closedBy,
+      targetId: ticket.userId,
+      detail: `ticket #${ticket.ticketNumber}`,
+    });
 
     const htmlBuffer = Buffer.from(htmlTranscript, 'utf-8');
     const attachment = new AttachmentBuilder(htmlBuffer, { name: `ticket-${ticket.ticketNumber}.html` });

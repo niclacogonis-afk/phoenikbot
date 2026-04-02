@@ -19,6 +19,8 @@ export interface IGuild extends Document {
     warnMuteThreshold: number;
     warnBanThreshold: number;
     muteDuration: number;
+    /** Se > 0 e modulo antirAid attivo: timeout automatico se account più giovane di X ore */
+    raidMinAccountAgeHours: number;
   };
   antilink: {
     whitelist: string[];
@@ -28,6 +30,10 @@ export interface IGuild extends Document {
   };
   verifyRole: string | null;
   verifyMode: 'button' | 'captcha' | 'roblox' | null;
+  unverifiedRole: string | null; // Role to remove when verified
+  ticketCategory: string | null; // Category for ticket channels
+  robloxUpdatesChannel: string | null; // Channel for Roblox update notifications
+  phoenikCustomerRole: string | null; // Role for Phoenik license customers
   createdAt: Date;
   updatedAt: Date;
 }
@@ -54,6 +60,7 @@ const GuildSchema = new Schema<IGuild>(
       backup: { type: Boolean, default: false },
       minigames: { type: Boolean, default: false },
       moderation: { type: Boolean, default: true },
+      automation: { type: Boolean, default: false },
     },
     logChannel: { type: String, default: null },
     modLogChannel: { type: String, default: null },
@@ -70,6 +77,7 @@ const GuildSchema = new Schema<IGuild>(
       warnMuteThreshold: { type: Number, default: 3 },
       warnBanThreshold: { type: Number, default: 5 },
       muteDuration: { type: Number, default: 3600000 },
+      raidMinAccountAgeHours: { type: Number, default: 0 },
     },
     antilink: {
       whitelist: { type: [String], default: ['youtube.com', 'youtu.be', 'roblox.com', 'discord.com', 'discord.gg', 'twitch.tv'] },
@@ -79,6 +87,10 @@ const GuildSchema = new Schema<IGuild>(
     },
     verifyRole: { type: String, default: null },
     verifyMode: { type: String, enum: ['button', 'captcha', 'roblox', null], default: null },
+    unverifiedRole: { type: String, default: null },
+    ticketCategory: { type: String, default: null },
+    robloxUpdatesChannel: { type: String, default: null },
+    phoenikCustomerRole: { type: String, default: null },
   },
   { timestamps: true }
 );

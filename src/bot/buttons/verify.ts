@@ -26,15 +26,16 @@ const handler: ButtonHandler = {
       }
 
       if (mode === 'button') {
-        await interaction.member.roles.add(verifyRole).catch(() => null);
+        await VerificationManager.grantVerification(interaction.member, verifyRole);
         await interaction.reply({ embeds: [successEmbed('Verified!', 'You now have access to the server.')], ephemeral: true });
         return;
       }
 
       if (mode === 'captcha') {
-        const code = await VerificationManager.startCaptcha(interaction.member);
+        // Generate code first, then show modal immediately
+        const code = VerificationManager.generateCode(6);
         const modal = new ModalBuilder()
-          .setCustomId(`verify:captcha:${verifyRole}`)
+          .setCustomId(`verify:captcha:${verifyRole}:${code}`)
           .setTitle('Captcha Verification')
           .addComponents(
             new ActionRowBuilder<TextInputBuilder>().addComponents(
@@ -46,7 +47,9 @@ const handler: ButtonHandler = {
                 .setMaxLength(8)
             )
           );
+        // Save code to database after showing modal to avoid timeout
         await interaction.showModal(modal);
+        await VerificationManager.startCaptchaWithCode(interaction.member, code);
         return;
       }
 

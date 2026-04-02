@@ -20,4 +20,6 @@ export const config = {
   twitchClientId: process.env['TWITCH_CLIENT_ID'] ?? '',
   twitchClientSecret: process.env['TWITCH_CLIENT_SECRET'] ?? '',
   isDev: process.env['NODE_ENV'] !== 'production',
+  /** Opzionale: Bearer o header X-API-Key per `/api/v1/...` */
+  dashboardApiKey: process.env['DASHBOARD_API_KEY'] ?? '',
 } as const;

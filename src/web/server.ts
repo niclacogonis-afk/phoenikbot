@@ -3,6 +3,8 @@ import session from 'express-session';
 import passport from 'passport';
 import { Strategy as DiscordStrategy } from 'passport-discord';
 import https from 'https';
+import path from 'path';
+import { ChannelType } from 'discord.js';
 import { config } from '../config';
 import { BotClient } from '../bot/client';
 import { GuildModel, getGuild } from '../database/models/Guild';
@@ -13,138 +15,49 @@ import { AutoResponseModel } from '../database/models/AutoResponse';
 import { YouTubeConfigModel } from '../database/models/YouTubeConfig';
 import { invalidateGuildCache } from '../modules/cache/CacheManager';
 import { logger } from '../utils/logger';
+import { TicketManager } from '../modules/ticket/TicketManager';
+import { AIModeration } from '../modules/ai/AIModeration';
+import { getWelcomeConfig, WelcomeConfigModel } from '../database/models/WelcomeConfig';
+import { layoutPage, guildRedirect } from './render/layout';
+import { safeEmbedMediaUrl } from '../utils/embedUrl';
+import { AutomationRuleModel } from '../database/models/AutomationRule';
+import type { GuildModules } from '../types';
+import { parseTicketButtonsJson, buildTicketOpenButtons, normalizeTicketButtons } from '../utils/ticketButtons';
+import { AuditLogModel } from '../database/models/AuditLog';
+import { BannedWordModel } from '../database/models/BannedWord';
 
-const CSS = `
-  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-  :root {
-    --bg: #0e1117; --surface: #161b22; --surface2: #21262d;
-    --border: #30363d; --primary: #5865F2; --primary-dark: #4752c4;
-    --success: #57F287; --danger: #ED4245; --warning: #FEE75C;
-    --text: #e6edf3; --text-muted: #8b949e;
-    --radius: 8px; --shadow: 0 4px 16px rgba(0,0,0,.4);
-  }
-  body { font-family: 'Segoe UI',system-ui,sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
-  a { color: var(--primary); text-decoration: none; }
-  a:hover { text-decoration: underline; }
-  .nav { background: var(--surface); border-bottom: 1px solid var(--border); padding: 0 24px; display: flex; align-items: center; justify-content: space-between; height: 56px; }
-  .nav-brand { font-size: 1.2rem; font-weight: 700; color: var(--text); display: flex; align-items: center; gap: 8px; }
-  .nav-brand span { color: var(--primary); }
-  .nav-links { display: flex; gap: 12px; align-items: center; }
-  .nav-links a { color: var(--text-muted); font-size: .9rem; padding: 6px 10px; border-radius: 6px; transition: all .2s; }
-  .nav-links a:hover { background: var(--surface2); color: var(--text); text-decoration: none; }
-  .container { max-width: 1100px; margin: 0 auto; padding: 32px 24px; }
-  .page-title { font-size: 1.8rem; font-weight: 700; margin-bottom: 8px; }
-  .page-subtitle { color: var(--text-muted); margin-bottom: 32px; }
-  .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px; margin-bottom: 20px; }
-  .card-title { font-size: 1rem; font-weight: 600; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
-  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-  .grid-3 { display: grid; grid-template-columns: repeat(3,1fr); gap: 16px; }
-  .guild-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; text-align: center; transition: all .2s; }
-  .guild-card:hover { border-color: var(--primary); transform: translateY(-2px); box-shadow: var(--shadow); }
-  .guild-icon { width: 64px; height: 64px; border-radius: 50%; margin: 0 auto 12px; background: var(--surface2); display: flex; align-items: center; justify-content: center; font-size: 1.5rem; overflow: hidden; }
-  .guild-icon img { width: 100%; height: 100%; object-fit: cover; }
-  .guild-name { font-weight: 600; margin-bottom: 12px; }
-  .btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 18px; border-radius: 6px; font-size: .9rem; font-weight: 500; border: none; cursor: pointer; transition: all .15s; text-decoration: none; }
-  .btn-primary { background: var(--primary); color: white; }
-  .btn-primary:hover { background: var(--primary-dark); text-decoration: none; color: white; }
-  .btn-success { background: var(--success); color: #000; }
-  .btn-danger { background: var(--danger); color: white; }
-  .btn-secondary { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
-  .btn-secondary:hover { background: var(--border); text-decoration: none; color: var(--text); }
-  .btn-sm { padding: 4px 12px; font-size: .8rem; }
-  .form-group { margin-bottom: 16px; }
-  label { display: block; font-size: .85rem; color: var(--text-muted); margin-bottom: 6px; font-weight: 500; }
-  input[type=text], input[type=number], input[type=color], select, textarea {
-    width: 100%; padding: 9px 12px; background: var(--surface2); border: 1px solid var(--border);
-    border-radius: 6px; color: var(--text); font-size: .9rem; outline: none; transition: border-color .2s;
-  }
-  input[type=text]:focus, select:focus, textarea:focus { border-color: var(--primary); }
-  textarea { resize: vertical; min-height: 80px; font-family: inherit; }
-  .toggle-row { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--border); }
-  .toggle-row:last-child { border-bottom: none; }
-  .toggle-label { font-size: .9rem; }
-  .toggle-desc { font-size: .78rem; color: var(--text-muted); margin-top: 2px; }
-  .switch { position: relative; width: 44px; height: 24px; flex-shrink: 0; }
-  .switch input { opacity: 0; width: 0; height: 0; }
-  .slider { position: absolute; cursor: pointer; inset: 0; background: var(--surface2); border: 1px solid var(--border); border-radius: 24px; transition: .3s; }
-  .slider:before { position: absolute; content: ''; height: 18px; width: 18px; left: 2px; bottom: 2px; background: var(--text-muted); border-radius: 50%; transition: .3s; }
-  input:checked + .slider { background: var(--primary); border-color: var(--primary); }
-  input:checked + .slider:before { transform: translateX(20px); background: white; }
-  .badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: .75rem; font-weight: 600; }
-  .badge-success { background: rgba(87,242,135,.15); color: var(--success); }
-  .badge-danger { background: rgba(237,66,69,.15); color: var(--danger); }
-  .badge-warning { background: rgba(254,231,92,.15); color: var(--warning); }
-  .sidebar-layout { display: grid; grid-template-columns: 220px 1fr; gap: 24px; }
-  .sidebar { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; height: fit-content; }
-  .sidebar-section { font-size: .72rem; text-transform: uppercase; letter-spacing: .1em; color: var(--text-muted); font-weight: 600; padding: 8px 10px 4px; }
-  .sidebar-item { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 6px; color: var(--text-muted); font-size: .9rem; cursor: pointer; transition: all .15s; text-decoration: none; margin-bottom: 2px; }
-  .sidebar-item:hover, .sidebar-item.active { background: var(--surface2); color: var(--text); text-decoration: none; }
-  .sidebar-item.active { color: var(--primary); }
-  .tab-content { display: none; }
-  .tab-content.active { display: block; }
-  .alert { padding: 12px 16px; border-radius: 6px; margin-bottom: 16px; font-size: .9rem; }
-  .alert-success { background: rgba(87,242,135,.1); border: 1px solid rgba(87,242,135,.3); color: var(--success); }
-  .alert-danger { background: rgba(237,66,69,.1); border: 1px solid rgba(237,66,69,.3); color: var(--danger); }
-  .stat-card { text-align: center; }
-  .stat-value { font-size: 2rem; font-weight: 700; color: var(--primary); }
-  .stat-label { font-size: .85rem; color: var(--text-muted); margin-top: 4px; }
-  .table { width: 100%; border-collapse: collapse; }
-  .table th { text-align: left; padding: 10px 12px; font-size: .8rem; text-transform: uppercase; color: var(--text-muted); border-bottom: 1px solid var(--border); }
-  .table td { padding: 10px 12px; border-bottom: 1px solid var(--border); font-size: .9rem; }
-  .table tr:last-child td { border-bottom: none; }
-  .hero { text-align: center; padding: 80px 24px; }
-  .hero h1 { font-size: 3rem; font-weight: 800; margin-bottom: 16px; }
-  .hero h1 span { color: var(--primary); }
-  .hero p { color: var(--text-muted); font-size: 1.1rem; max-width: 500px; margin: 0 auto 32px; }
-  .color-preview { width: 36px; height: 36px; border-radius: 6px; border: 1px solid var(--border); display: inline-block; vertical-align: middle; margin-left: 8px; }
-  .input-row { display: flex; gap: 8px; align-items: flex-end; }
-  .input-row .form-group { flex: 1; margin-bottom: 0; }
-  .tag { display: inline-block; background: var(--surface2); border: 1px solid var(--border); border-radius: 4px; padding: 2px 8px; font-size: .8rem; margin: 2px; }
-  .tag-remove { cursor: pointer; color: var(--danger); margin-left: 4px; }
-  @media (max-width: 768px) { .sidebar-layout { grid-template-columns: 1fr; } .grid-2,.grid-3 { grid-template-columns: 1fr; } }
-`;
+function escapeHtml(str: string): string {
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
 
-function layout(title: string, content: string, user?: any) {
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>${title} - PhoenikBot</title>
-  <style>${CSS}</style>
-</head>
-<body>
-  <nav class="nav">
-    <div class="nav-brand">🔥 Phoenik<span>Bot</span></div>
-    <div class="nav-links">
-      ${user ? `<span style="color:var(--text-muted);font-size:.9rem">👤 ${user.username}</span><a href="/auth/logout">Logout</a>` : '<a href="/auth/discord" class="btn btn-primary btn-sm">Login with Discord</a>'}
-    </div>
-  </nav>
-  <div>${content}</div>
-  <script>
-    function toggleTab(id) {
-      document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
-      document.querySelectorAll('.sidebar-item[data-tab]').forEach(t => t.classList.remove('active'));
-      document.getElementById(id)?.classList.add('active');
-      document.querySelector('[data-tab="'+id+'"]')?.classList.add('active');
-      localStorage.setItem('activeTab_'+location.pathname, id);
-    }
-    document.addEventListener('DOMContentLoaded', () => {
-      const saved = localStorage.getItem('activeTab_'+location.pathname);
-      if (saved && document.getElementById(saved)) toggleTab(saved);
-      else { const first = document.querySelector('.tab-content'); if (first) first.classList.add('active'); }
-    });
-    function previewColor(val, previewId) {
-      const el = document.getElementById(previewId);
-      if (el) el.style.background = val;
-    }
-  </script>
-</body>
-</html>`;
+const PUBLIC_DIR = path.join(__dirname, '..', '..', 'public');
+
+function isDiscordManagePermission(permissionsStr: string | undefined): boolean {
+  if (permissionsStr == null || permissionsStr === '') return false;
+  try {
+    const p = BigInt(String(permissionsStr));
+    return (p & 8n) === 8n || (p & 32n) === 32n;
+  } catch {
+    const n = parseInt(String(permissionsStr), 10);
+    return (n & 8) === 8 || (n & 32) === 32;
+  }
 }
 
 export function createWebServer(client: BotClient) {
   const app = express();
+
+  if (!config.isDev) {
+    app.set('trust proxy', 1);
+  }
+
+  app.use((req, res, next) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+    next();
+  });
+
+  app.use('/assets', express.static(PUBLIC_DIR));
 
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
@@ -154,8 +67,6 @@ export function createWebServer(client: BotClient) {
     resave: false,
     saveUninitialized: false,
   }));
-
-  const tlsAgent = new https.Agent({ rejectUnauthorized: false });
 
   passport.use(new DiscordStrategy({
     clientID: config.clientId,
@@ -170,7 +81,6 @@ export function createWebServer(client: BotClient) {
             hostname: 'discord.com',
             path: '/api/v10/users/@me/guilds',
             headers: { Authorization: `Bearer ${accessToken}` },
-            agent: tlsAgent,
           }, (res) => {
             let data = '';
             res.on('data', (chunk) => { data += chunk; });
@@ -200,12 +110,13 @@ export function createWebServer(client: BotClient) {
     res.redirect('/');
   }
 
+  /** Owner, Discord Administrator (0x8), or Manage Requiresr / Manage Guild (0x20). */
   function isGuildAdmin(req: express.Request, guildId: string): boolean {
     const user = req.user as any;
     if (!user) return false;
     if (config.ownerIds.includes(user.id)) return true;
     const guild = (user.guilds ?? []).find((g: any) => g.id === guildId);
-    return guild && (parseInt(guild.permissions) & 0x20) === 0x20;
+    return Boolean(guild && isDiscordManagePermission(guild.permissions));
   }
 
   app.get('/auth/discord', passport.authenticate('discord'));
@@ -219,9 +130,9 @@ export function createWebServer(client: BotClient) {
 
   app.get('/', (req, res) => {
     const user = req.user as any;
-    res.send(layout('Home', `
+    res.send(layoutPage('Home', `
       <div class="hero">
-        <h1>🔥 Phoenik<span style="color:var(--primary)">Bot</span></h1>
+        <h1 class="hero-title">🔥 Phoenik<span class="brand-hot">Bot</span></h1>
         <p>Advanced Discord bot with tickets, moderation, giveaways, verification, and more.</p>
         ${user
           ? `<a href="/dashboard" class="btn btn-primary">Go to Dashboard</a>`
@@ -238,17 +149,19 @@ export function createWebServer(client: BotClient) {
 
   app.get('/dashboard', requireAuth, (req, res) => {
     const user = req.user as any;
-    const userGuilds = (user.guilds ?? []).filter((g: any) => (parseInt(g.permissions) & 0x20) === 0x20);
+    const userGuilds = (user.guilds ?? []).filter((g: any) =>
+      config.ownerIds.includes(user.id) || isDiscordManagePermission(g.permissions)
+    );
     const botGuilds = client.guilds.cache;
     const manageable = userGuilds.filter((g: any) => botGuilds.has(g.id));
     const invitable = userGuilds.filter((g: any) => !botGuilds.has(g.id));
 
-    res.send(layout('Dashboard', `
+    res.send(layoutPage('Dashboard', `
       <div class="container">
         <div class="page-title">👋 Welcome, ${user.username}</div>
         <div class="page-subtitle">Select a server to manage</div>
-        ${manageable.length === 0 ? `<div class="card"><p style="color:var(--text-muted)">No servers found where you have Administrator permissions and PhoenikBot is added.</p></div>` : ''}
-        <div class="grid-3">
+        ${manageable.length === 0 ? `<div class="card"><p style="color:var(--text-muted)">No servers found with <strong>Manage Requiresr</strong> or <strong>Administrator</strong> permission where PhoenikBot is present.</p></div>` : ''}
+        <div class="guild-grid">
           ${manageable.map((g: any) => `
             <div class="guild-card">
               <div class="guild-icon">
@@ -279,16 +192,26 @@ export function createWebServer(client: BotClient) {
     const guild = client.guilds.cache.get(guildId);
     if (!guild) { res.redirect('/dashboard'); return; }
 
-    const [guildData, ticketConfig, stats, autoResponses, ytConfigs] = await Promise.all([
+    await guild.channels.fetch().catch(() => null);
+
+    const [guildData, ticketConfig, welcomeConfig, stats, autoResponses, ytConfigs, recentTickets, automationRules, auditEntries] = await Promise.all([
       getGuild(guildId),
       getTicketConfig(guildId),
+      getWelcomeConfig(guildId),
       StatsModel.find({ guildId }).sort({ date: -1 }).limit(7),
       AutoResponseModel.find({ guildId }).sort({ createdAt: -1 }).limit(50),
       YouTubeConfigModel.find({ guildId }),
+      TicketModel.find({ guildId }).sort({ createdAt: -1 }).limit(8),
+      AutomationRuleModel.find({ guildId }).sort({ createdAt: -1 }).limit(50),
+      AuditLogModel.find({ guildId }).sort({ createdAt: -1 }).limit(150),
     ]);
 
     const channels = guild.channels.cache
-      .filter((c) => c.type === 0)
+      .filter(
+        (c) =>
+          (c.type === ChannelType.GuildText || c.type === ChannelType.GuildAnnouncement) &&
+          !c.isThread()
+      )
       .sort((a, b) => (a as any).position - (b as any).position)
       .map((c) => ({ id: c.id, name: (c as any).name ?? c.id }));
 
@@ -297,13 +220,31 @@ export function createWebServer(client: BotClient) {
       .sort((a, b) => b.position - a.position)
       .map((r) => ({ id: r.id, name: r.name, color: r.hexColor }));
 
+    const categories = guild.channels.cache
+      .filter((c) => c.type === 4) // GUILD_CATEGORY
+      .sort((a, b) => (a as any).position - (b as any).position)
+      .map((c) => ({ id: c.id, name: (c as any).name ?? c.id }));
+
     const totalMessages = stats.reduce((s, d) => s + (d.messages ?? 0), 0);
     const totalJoins = stats.reduce((s, d) => s + (d.joins ?? 0), 0);
     const openTickets = await TicketModel.countDocuments({ guildId, status: 'open' });
     const closedTickets = await TicketModel.countDocuments({ guildId, status: 'closed' });
+    const maxStatMsg = Math.max(1, ...stats.map((d) => d.messages ?? 0));
 
-    const flash = req.query.saved ? `<div class="alert alert-success">✅ Settings saved successfully!</div>` :
-                  req.query.error ? `<div class="alert alert-danger">❌ Error: ${req.query.error}</div>` : '';
+    const moduleKeysList = [
+      'ticket', 'giveaway', 'verification', 'antirAid', 'antinuke', 'antilink', 'logging', 'youtube', 'twitch',
+      'roblox', 'ai', 'suggestions', 'reactionRoles', 'stats', 'schedule', 'backup', 'minigames', 'moderation', 'automation',
+    ] as const;
+    const modulesMerged: Record<string, boolean> = {};
+    for (const k of moduleKeysList) {
+      modulesMerged[k] = Boolean(guildData.modules[k as keyof GuildModules]);
+    }
+
+    const flash = req.query.saved
+      ? `<div class="alert alert-success">✅ Impostazioni salvate.</div>`
+      : req.query.error
+        ? `<div class="alert alert-danger">❌ ${escapeHtml(String(req.query.error))}</div>`
+        : '';
 
     const moduleDescriptions: Record<string, string> = {
       ticket: 'Ticket support system', giveaway: 'Giveaway system',
@@ -313,54 +254,99 @@ export function createWebServer(client: BotClient) {
       twitch: 'Twitch notifications', roblox: 'Roblox integrations',
       ai: 'AI moderation', suggestions: 'Suggestion system',
       reactionRoles: 'Reaction/button roles', stats: 'Statistics tracking',
-      schedule: 'Scheduled messages', backup: 'Server backup',
+      schedule: 'Scheduled messages', backup: 'Requiresr backup',
       minigames: 'Mini games', moderation: 'Moderation commands',
+      automation: 'IF/THEN rules (keyword → reply)',
     };
 
-    res.send(layout(`${guild.name} - Dashboard`, `
-      <div class="container">
-        <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px">
-          <a href="/dashboard" style="color:var(--text-muted);font-size:.9rem">← Back</a>
-        </div>
-        <div class="page-title">
-          ${guild.iconURL() ? `<img src="${guild.iconURL()}" style="width:36px;height:36px;border-radius:50%;vertical-align:middle;margin-right:8px">` : ''}
-          ${guild.name}
-        </div>
-        <div class="page-subtitle">${guild.memberCount} members</div>
+    const chartBars = [...stats].reverse().map((d) => {
+      const h = Math.round(((d.messages ?? 0) / maxStatMsg) * 100);
+      return `<div class="chart-bar" style="height:${h}%"><span>${escapeHtml(String(d.date).slice(5))}</span></div>`;
+    }).join('');
 
-        <div class="grid-3" style="margin-bottom:24px">
-          <div class="card stat-card"><div class="stat-value">${totalMessages}</div><div class="stat-label">Messages (7d)</div></div>
-          <div class="card stat-card"><div class="stat-value">${openTickets}</div><div class="stat-label">Open Tickets</div></div>
-          <div class="card stat-card"><div class="stat-value">${totalJoins}</div><div class="stat-label">Joins (7d)</div></div>
+    res.send(layoutPage(`${guild.name}`, `
+      <div class="container">
+        <div class="guild-header-row">
+          <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+            <a href="/dashboard" class="btn btn-ghost btn-sm">← Requiresr</a>
+            ${guild.iconURL({ size: 64 }) ? `<img src="${guild.iconURL({ size: 64 })}" width="40" height="40" style="border-radius:50%;border:1px solid var(--border)">` : ''}
+            <div>
+              <div class="page-title" style="margin:0">${escapeHtml(guild.name)}</div>
+              <div class="page-subtitle" style="margin:0">${escapeHtml(guild.id)} · ${guild.memberCount} members</div>
+            </div>
+          </div>
+          <span class="pill">Dashboard live</span>
         </div>
 
         ${flash}
 
-        <div class="sidebar-layout">
-          <div class="sidebar">
-            <div class="sidebar-section">Settings</div>
-            <a class="sidebar-item active" data-tab="tab-modules" onclick="toggleTab('tab-modules')">📦 Modules</a>
-            <a class="sidebar-item" data-tab="tab-general" onclick="toggleTab('tab-general')">⚙️ General</a>
-            <a class="sidebar-item" data-tab="tab-ticket" onclick="toggleTab('tab-ticket')">🎫 Tickets</a>
-            <a class="sidebar-item" data-tab="tab-logging" onclick="toggleTab('tab-logging')">📋 Logging</a>
-            <a class="sidebar-item" data-tab="tab-roles" onclick="toggleTab('tab-roles')">👥 Roles</a>
-            <a class="sidebar-item" data-tab="tab-automod" onclick="toggleTab('tab-automod')">🛡️ AutoMod</a>
-            <div class="sidebar-section">Data</div>
-            <a class="sidebar-item" data-tab="tab-verify" onclick="toggleTab('tab-verify')">✅ Verification</a>
-            <a class="sidebar-item" data-tab="tab-autoresponse" onclick="toggleTab('tab-autoresponse')">🤖 Auto-response</a>
-            <a class="sidebar-item" data-tab="tab-youtube" onclick="toggleTab('tab-youtube')">📺 YouTube</a>
-            <a class="sidebar-item" data-tab="tab-tickets-list" onclick="toggleTab('tab-tickets-list')">📝 Ticket List</a>
-            <a class="sidebar-item" data-tab="tab-stats" onclick="toggleTab('tab-stats')">📊 Stats</a>
-          </div>
+        <button type="button" class="btn btn-secondary btn-sm mobile-sidebar-toggle" id="mobileSidebarToggle">☰ Menu</button>
 
-          <div style="min-width:0">
+        <div class="guild-shell">
+          <aside class="sidebar-rail">
+            <nav class="sidebar-nav" aria-label="Sections">
+              <div class="sidebar-section">Home</div>
+              <a class="active" href="#" data-tab="tab-overview">Overview</a>
+              <div class="sidebar-section">Core</div>
+              <a href="#" data-tab="tab-modules">Modules</a>
+              <a href="#" data-tab="tab-tickets">Tickets</a>
+              <a href="#" data-tab="tab-general">Requiresr</a>
+              <a href="#" data-tab="tab-logging">Logs</a>
+              <a href="#" data-tab="tab-audit">Audit</a>
+              <a href="#" data-tab="tab-roles">Roles</a>
+              <a href="#" data-tab="tab-automod">Security</a>
+              <div class="sidebar-section">Community</div>
+              <a href="#" data-tab="tab-verify">Verification</a>
+              <a href="#" data-tab="tab-autoresponse">Auto‑reply</a>
+              <a href="#" data-tab="tab-welcome">Welcome</a>
+              <a href="#" data-tab="tab-youtube">YouTube</a>
+              <a href="#" data-tab="tab-stats">Statistics</a>
+              <div class="sidebar-section">LAB</div>
+              <a href="#" data-tab="tab-ai">AI assist</a>
+              <a href="#" data-tab="tab-automations">Automations</a>
+              <a href="#" data-tab="tab-roadmap">Roadmap</a>
+            </nav>
+          </aside>
+
+          <div class="guild-main">
+            <div id="tab-overview" class="tab-content">
+              <div class="grid-3">
+                <div class="card stat-card glass-card"><div class="stat-value">${totalMessages}</div><div class="stat-label">Messages (7d)</div></div>
+                <div class="card stat-card glass-card"><div class="stat-value">${openTickets}</div><div class="stat-label">Open tickets</div></div>
+                <div class="card stat-card glass-card"><div class="stat-value">${totalJoins}</div><div class="stat-label">New users (7d)</div></div>
+              </div>
+              <div class="grid-2" style="margin-top:16px">
+                <div class="card">
+                  <div class="card-title">Message Activity</div>
+                  ${stats.length ? `<div class="chart-row">${chartBars}</div>` : '<p class="placeholder-panel">No data yet — the bot collects daily stats.</p>'}
+                </div>
+                <div class="card">
+                  <div class="card-title">Recent Tickets</div>
+                  ${recentTickets.length === 0
+                    ? '<p class="placeholder-panel">No tickets registered.</p>'
+                    : `<table class="table"><thead><tr><th>#</th><th>Status</th><th>Type</th><th>User</th></tr></thead><tbody>
+                      ${recentTickets.map((t) => `<tr>
+                        <td>#${t.ticketNumber}</td>
+                        <td><span class="badge ${t.status === 'open'
+                          ? 'badge-success'
+                          : t.status === 'closed'
+                            ? 'badge-danger'
+                            : 'badge-warn'}">${t.status}</span></td>
+                        <td>${escapeHtml(t.type)}</td>
+                        <td><code style="font-size:.78rem">${t.userId}</code></td>
+                      </tr>`).join('')}
+                    </tbody></table>
+                    <p style="margin-top:10px;font-size:.85rem;color:var(--muted)">Apri la sezione <strong>Ticket</strong> per inbox completa e azioni staff.</p>`}
+                </div>
+              </div>
+            </div>
 
             <!-- MODULES TAB -->
             <div id="tab-modules" class="tab-content">
               <div class="card">
                 <div class="card-title">📦 Module Management</div>
                 <form method="POST" action="/api/guild/${guildId}/modules">
-                  ${Object.entries(guildData.modules).map(([name, enabled]) => `
+                  ${Object.entries(modulesMerged).map(([name, enabled]) => `
                     <div class="toggle-row">
                       <div>
                         <div class="toggle-label">${name.charAt(0).toUpperCase() + name.slice(1)}</div>
@@ -422,43 +408,120 @@ export function createWebServer(client: BotClient) {
               </div>
             </div>
 
-            <!-- TICKET TAB -->
-            <div id="tab-ticket" class="tab-content">
-              <form method="POST" action="/api/guild/${guildId}/ticket/config">
+            <div id="tab-tickets" class="tab-content">
               <div class="card">
-                <div class="card-title">🎫 Panel Embed (what users see)</div>
+                <div class="card-title">🎫 Ticket Inbox</div>
+                <p style="color:var(--muted);font-size:.88rem;margin-bottom:12px">Select a ticket to view saved messages, AI insights (if configured), and quick actions.</p>
+                <div class="inbox-split">
+                  <div class="inbox-list" id="ticketInboxList"><div style="padding:12px;color:var(--muted)">Loading…</div></div>
+                  <div class="inbox-detail" id="ticketInboxDetail" style="color:var(--muted)">Select a ticket from the list.</div>
+                </div>
+              </div>
+
+              <form id="ticketConfigForm" method="POST" action="/api/guild/${guildId}/ticket/config">
+              <div class="grid-2">
+                <div class="card">
+                <div class="card-title">🎫 Ticket Panel — Content</div>
                 <div class="grid-2">
                   <div class="form-group">
-                    <label>Embed Title</label>
-                    <input type="text" name="embedTitle" value="${escapeHtml(ticketConfig.embedTitle)}">
+                    <label>Titolo embed</label>
+                    <input type="text" name="embedTitle" id="fldEmbedTitle" value="${escapeHtml(ticketConfig.embedTitle)}">
                   </div>
                   <div class="form-group">
-                    <label>Embed Color</label>
+                    <label>Colore</label>
                     <div style="display:flex;align-items:center;gap:8px">
-                      <input type="color" name="embedColor" value="${ticketConfig.embedColor}" style="width:50px;height:38px;padding:2px;cursor:pointer" id="embedColorPicker" onchange="document.getElementById('embedColorText').value=this.value;document.getElementById('embedColorPreview').style.background=this.value">
-                      <input type="text" name="embedColorText" id="embedColorText" value="${escapeHtml(ticketConfig.embedColor)}" style="flex:1" oninput="document.getElementById('embedColorPicker').value=this.value;document.getElementById('embedColorPreview').style.background=this.value">
+                      <input type="color" name="embedColor" value="${ticketConfig.embedColor}" style="width:50px;height:38px;padding:2px;cursor:pointer" id="embedColorPicker" onchange="document.getElementById('embedColorText').value=this.value;document.getElementById('embedColorPreview').style.background=this.value;window.phoenixSyncPreview && window.phoenixSyncPreview()">
+                      <input type="text" name="embedColorText" id="embedColorText" value="${escapeHtml(ticketConfig.embedColor)}" style="flex:1" oninput="document.getElementById('embedColorPicker').value=this.value;document.getElementById('embedColorPreview').style.background=this.value;window.phoenixSyncPreview && window.phoenixSyncPreview()">
                       <span id="embedColorPreview" class="color-preview" style="background:${ticketConfig.embedColor}"></span>
                     </div>
                   </div>
                 </div>
                 <div class="form-group">
-                  <label>Embed Description</label>
-                  <textarea name="embedDescription">${escapeHtml(ticketConfig.embedDescription)}</textarea>
+                  <label>Descrizione embed</label>
+                  <textarea name="embedDescription" id="fldEmbedDesc">${escapeHtml(ticketConfig.embedDescription)}</textarea>
                 </div>
-                <div class="grid-2">
-                  <div class="form-group">
-                    <label>Image URL (optional, shown below description)</label>
-                    <input type="text" name="embedImage" value="${escapeHtml(ticketConfig.embedImage ?? '')}" placeholder="https://...">
+                </div>
+                <div class="card">
+                  <div class="card-title">📺 Live Preview</div>
+                  <div id="embedLivePreview" class="embed-preview" style="border-left-color:${escapeHtml(ticketConfig.embedColor)}">
+                    <div class="t" id="pvTitle">${escapeHtml(ticketConfig.embedTitle)}</div>
+                    <div class="d" id="pvDesc">${escapeHtml(ticketConfig.embedDescription)}</div>
+                    <div class="f">PhoenikBot · preview</div>
                   </div>
-                  <div class="form-group">
-                    <label>Thumbnail URL (optional, top-right corner)</label>
-                    <input type="text" name="embedThumbnail" value="${escapeHtml(ticketConfig.embedThumbnail ?? '')}" placeholder="https://...">
+                  <p style="margin-top:10px;font-size:.78rem;color:var(--muted)">L’anteprima aggiorna mentre modifichi titolo, descrizione e colore.</p>
+                </div>
+              </div>
+                <div class="card">
+                  <div class="card-title">🖼️ Embed Images</div>
+                  <div class="alert alert-info" style="margin-bottom:12px">
+                    <strong>📌 How to get Discord image URLs:</strong><br>
+                    1. Upload your image in Discord chat<br>
+                    2. <strong>Right-click the image</strong> → "Copy Link"<br>
+                    3. Paste the link (must contain <code>cdn.discordapp.com</code>)<br>
+                    <br>
+                    <strong>⚠️ Don't copy the message link!</strong> You need the direct image URL.
                   </div>
+                  <div class="grid-2">
+                    <div class="form-group">
+                      <label>Image URL (shown below description)</label>
+                      <input type="text" name="embedImage" id="embedImageField" value="${escapeHtml(ticketConfig.embedImage ?? '')}" placeholder="https://cdn.discordapp.com/attachments/...">
+                      <div id="embedImageStatus" style="font-size:.75rem;margin-top:4px"></div>
+                    </div>
+                    <div class="form-group">
+                      <label>Thumbnail URL (top-right corner)</label>
+                      <input type="text" name="embedThumbnail" id="embedThumbnailField" value="${escapeHtml(ticketConfig.embedThumbnail ?? '')}" placeholder="https://cdn.discordapp.com/avatars/...">
+                      <div id="embedThumbnailStatus" style="font-size:.75rem;margin-top:4px"></div>
+                    </div>
+                  </div>
+                  <script>
+                    function validateImageUrl(fieldId, statusId) {
+                      const field = document.getElementById(fieldId);
+                      const status = document.getElementById(statusId);
+                      const value = field.value.trim();
+                      
+                      if (!value) {
+                        status.innerHTML = '<span style="color:var(--text-muted)">Optional field</span>';
+                        field.style.borderColor = '';
+                        return;
+                      }
+                      
+                      // Check for Discord message links
+                      if (value.includes('discord.com/channels/') || value.includes('discord.com/messages/')) {
+                        status.innerHTML = '<span style="color:#ED4245">❌ This is a message link, not an image! Right-click the image itself and copy its link.</span>';
+                        field.style.borderColor = '#ED4245';
+                        return;
+                      }
+                      
+                      // Check for valid patterns
+                      const validPatterns = ['cdn.discordapp.com', 'media.discordapp.net', 'images.unsplash.com', 'imgur.com', '.png', '.jpg', '.jpeg', '.gif', '.webp'];
+                      const isValid = validPatterns.some(p => value.includes(p));
+                      
+                      if (isValid) {
+                        status.innerHTML = '<span style="color:#57F287">✅ Valid image URL</span>';
+                        field.style.borderColor = '#57F287';
+                      } else {
+                        status.innerHTML = '<span style="color:#FEE75C">⚠️ URL format unknown. Try copying the direct image link from Discord.</span>';
+                        field.style.borderColor = '#FEE75C';
+                      }
+                    }
+                    
+                    document.getElementById('embedImageField')?.addEventListener('input', () => validateImageUrl('embedImageField', 'embedImageStatus'));
+                    document.getElementById('embedThumbnailField')?.addEventListener('input', () => validateImageUrl('embedThumbnailField', 'embedThumbnailStatus'));
+                    validateImageUrl('embedImageField', 'embedImageStatus');
+                    validateImageUrl('embedThumbnailField', 'embedThumbnailStatus');
+                  </script>
                 </div>
                 <div class="form-group">
                   <label>Footer Text (optional)</label>
                   <input type="text" name="embedFooter" value="${escapeHtml(ticketConfig.embedFooter ?? '')}" placeholder="Your server name or custom text">
                 </div>
+
+              <div class="card">
+                <div class="card-title">🔘 Panel Buttons (max 25)</div>
+                <p style="font-size:.82rem;color:var(--muted);margin-bottom:10px">Customize label, emoji (optional), <strong>type ID</strong> (only <code>a-z</code>, <code>0-9</code>, <code>_</code>, <code>-</code>) and style. Each type opens a ticket with that type (e.g. <code>support</code>, <code>vip</code>). Paste Discord images: copy attachment link or GIF (CDN <code>cdn.discordapp.com</code> / <code>media.discordapp.net</code>).</p>
+                <div id="ticketBtnBuilder" class="ticket-btn-builder"></div>
+                <button type="button" class="btn btn-secondary btn-sm" id="ticketBtnAdd">+ Add Button</button>
+                <input type="hidden" name="ticketButtonsJson" id="ticketButtonsJsonField" value="">
               </div>
 
               <div class="card">
@@ -473,6 +536,13 @@ export function createWebServer(client: BotClient) {
                     <label>Auto-close after inactivity (hours, 0 = disabled)</label>
                     <input type="number" name="autoCloseHours" value="${ticketConfig.autoCloseHours}" min="0" max="168">
                   </div>
+                </div>
+                <div class="form-group" style="margin-top:12px">
+                  <label>Ticket Category (where to create ticket channels)</label>
+                  <select name="ticketCategory">
+                    <option value="">No category (default)</option>
+                    ${categories.map((c) => `<option value="${c.id}" ${guildData.ticketCategory === c.id ? 'selected' : ''}>${escapeHtml(c.name)}</option>`).join('')}
+                  </select>
                 </div>
               </div>
 
@@ -528,24 +598,29 @@ export function createWebServer(client: BotClient) {
               </div>
 
               <div class="card">
-                <div class="card-title">📢 Staff & Logging</div>
-                <div class="grid-2">
-                  <div class="form-group">
-                    <label>Staff Role</label>
-                    <select name="staffRole">
-                      <option value="">None</option>
-                      ${roles.map((r) => `<option value="${r.id}" ${ticketConfig.staffRoles.includes(r.id) ? 'selected' : ''}>${r.name}</option>`).join('')}
-                    </select>
+                <div class="card-title">Staff ticket & log</div>
+                <div class="form-group">
+                  <label>Staff Roles (thread access)</label>
+                  <div id="ticketStaffTags" style="margin-bottom:8px">
+                    ${ticketConfig.staffRoles.map((id) => {
+                        const r = roles.find((x) => x.id === id);
+                        return `<span class="tag">${r ? escapeHtml(r.name) : id} <span class="tag-remove" onclick="removeTicketStaff('${id}',this.parentElement)">×</span></span>`;
+                      }).join('')}
                   </div>
-                  <div class="form-group">
-                    <label>Log Channel</label>
-                    <select name="logChannel">
-                      <option value="">None</option>
-                      ${channels.map((c) => `<option value="${c.id}" ${ticketConfig.logChannelId === c.id ? 'selected' : ''}>#${c.name}</option>`).join('')}
-                    </select>
-                  </div>
+                  <input type="hidden" name="staffRoles" id="ticketStaffInput" value="${ticketConfig.staffRoles.join(',')}">
+                  <select id="ticketStaffSelect" onchange="addTicketStaff(this)">
+                    <option value="">Aggiungi ruolo…</option>
+                    ${roles.map((r) => `<option value="${r.id}">${escapeHtml(r.name)}</option>`).join('')}
+                  </select>
                 </div>
-                <button type="submit" class="btn btn-primary">💾 Save Ticket Config</button>
+                <div class="form-group">
+                  <label>Canale log ticket</label>
+                  <select name="logChannel">
+                    <option value="">None</option>
+                    ${channels.map((c) => `<option value="${c.id}" ${ticketConfig.logChannelId === c.id ? 'selected' : ''}>#${escapeHtml(c.name)}</option>`).join('')}
+                  </select>
+                </div>
+                <button type="submit" class="btn btn-primary">Save ticket configuration</button>
               </div>
               </form>
 
@@ -587,6 +662,23 @@ export function createWebServer(client: BotClient) {
                   </div>
                   <button type="submit" class="btn btn-primary">Save</button>
                 </form>
+              </div>
+            </div>
+
+            <div id="tab-audit" class="tab-content">
+              <div class="card">
+                <div class="card-title">Audit (dashboard)</div>
+                <p style="font-size:.85rem;color:var(--muted);margin-bottom:12px">Eventi registrati dal bot (apertura/chiusura ticket, ecc.). API REST: <code>GET ${escapeHtml(config.dashboardUrl)}/api/v1/guild/${guildId}/audit</code> con header <code>Authorization: Bearer TUA_CHIAVE</code> o <code>X-API-Key</code> (variabile <code>DASHBOARD_API_KEY</code> nel <code>.env</code>).</p>
+                ${auditEntries.length === 0
+                  ? '<p class="placeholder-panel">No events yet.</p>'
+                  : `<div style="overflow:auto;max-height:420px;border:1px solid var(--border);border-radius:12px"><table class="table"><thead><tr><th>Date</th><th>Action</th><th>Actor</th><th>Details</th></tr></thead><tbody>
+                    ${auditEntries.map((a: any) => `<tr>
+                      <td style="white-space:nowrap;font-size:.78rem">${escapeHtml(new Date(a.createdAt).toLocaleString())}</td>
+                      <td><code>${escapeHtml(a.action)}</code></td>
+                      <td style="font-size:.78rem">${a.actorId ? '<code>'+escapeHtml(a.actorId)+'</code>' : '—'}</td>
+                      <td style="font-size:.78rem;max-width:280px">${a.detail ? escapeHtml(a.detail) : '—'}</td>
+                    </tr>`).join('')}
+                    </tbody></table></div>`}
               </div>
             </div>
 
@@ -673,6 +765,10 @@ export function createWebServer(client: BotClient) {
                       <input type="number" name="raidSeconds" value="${guildData.autoModThresholds.raidSeconds}" min="1" max="60">
                     </div>
                     <div class="form-group">
+                      <label>Anti-raid: Minimum account age (hours, 0 = off)</label>
+                      <input type="number" name="raidMinAccountAgeHours" value="${guildData.autoModThresholds.raidMinAccountAgeHours ?? 0}" min="0" max="8760" title="If > 0, new accounts will be timed out (requires ModerateMembers permission)">
+                    </div>
+                    <div class="form-group">
                       <label>Nuke: Max channel deletes</label>
                       <input type="number" name="nukeChannelDeletes" value="${guildData.autoModThresholds.nukeChannelDeletes}" min="1" max="20">
                     </div>
@@ -687,6 +783,18 @@ export function createWebServer(client: BotClient) {
                     <div class="form-group">
                       <label>Warn → Ban (# of warns)</label>
                       <input type="number" name="warnBanThreshold" value="${guildData.autoModThresholds.warnBanThreshold}" min="1" max="20">
+                    </div>
+                    <div class="form-group">
+                      <label>Auto-mute duration after warn (minutes)</label>
+                      <input type="number" name="muteDurationMinutes" value="${Math.round((guildData.autoModThresholds.muteDuration ?? 3600000) / 60000)}" min="1" max="10080">
+                    </div>
+                    <div class="form-group">
+                      <label>Nuke: Max role deletions</label>
+                      <input type="number" name="nukeRoleDeletes" value="${guildData.autoModThresholds.nukeRoleDeletes}" min="1" max="30">
+                    </div>
+                    <div class="form-group">
+                      <label>Nuke: Detection window (seconds)</label>
+                      <input type="number" name="nukeWindowSeconds" value="${guildData.autoModThresholds.nukeWindowSeconds}" min="5" max="300">
                     </div>
                   </div>
                   <button type="submit" class="btn btn-primary">Save Thresholds</button>
@@ -715,8 +823,154 @@ export function createWebServer(client: BotClient) {
                       ${roles.map((r) => `<option value="${r.id}" ${guildData.verifyRole === r.id ? 'selected' : ''}>${r.name}</option>`).join('')}
                     </select>
                   </div>
+                  <div class="form-group">
+                    <label>Role to remove after verification (e.g., "Not Verified")</label>
+                    <select name="unverifiedRole">
+                      <option value="">None</option>
+                      ${roles.map((r) => `<option value="${r.id}" ${guildData.unverifiedRole === r.id ? 'selected' : ''}>${r.name}</option>`).join('')}
+                    </select>
+                  </div>
                   <p style="color:var(--text-muted);font-size:.85rem;margin-bottom:12px">Use <strong>/verify setup</strong> in Discord to send the verification panel to a channel.</p>
                   <button type="submit" class="btn btn-primary">💾 Save Verification</button>
+                </form>
+              </div>
+            </div>
+
+            <!-- WELCOME TAB -->
+            <div id="tab-welcome" class="tab-content">
+              <div class="card">
+                <div class="card-title">👋 Welcome Message Settings</div>
+                <p style="color:var(--text-muted);font-size:.88rem;margin-bottom:16px">Configure welcome messages and auto-roles for new members joining the server.</p>
+                
+                <form method="POST" action="/api/guild/${guildId}/welcome">
+                  <div class="grid-2">
+                    <div class="form-group">
+                      <label>Welcome Channel</label>
+                      <select name="welcomeChannelId">
+                        <option value="">None (disabled)</option>
+                        ${channels.map((c) => `<option value="${c.id}" ${welcomeConfig.welcomeChannelId === c.id ? 'selected' : ''}>#${c.name}</option>`).join('')}
+                      </select>
+                    </div>
+                    <div class="form-group">
+                      <label>Auto-Role Delay (ms)</label>
+                      <input type="number" name="autoRoleDelay" value="${welcomeConfig.autoRoleDelay || 0}" min="0" max="60000" step="1000" placeholder="0 = immediately">
+                      <div style="font-size:.75rem;color:var(--text-muted);margin-top:4px">Delay before applying auto-roles (0 = immediately)</div>
+                    </div>
+                  </div>
+
+                  <div class="form-group">
+                    <label>Auto-Roles (assigned when member joins)</label>
+                    <div id="welcomeAutoRoles" style="margin-bottom:8px">
+                      ${welcomeConfig.autoRoleIds && welcomeConfig.autoRoleIds.length > 0 
+                        ? welcomeConfig.autoRoleIds.map((rid) => {
+                            const r = roles.find((x: any) => x.id === rid);
+                            return r ? `<span class="badge badge-secondary" style="margin:4px;display:inline-flex;align-items:center;gap:4px;padding:4px 8px"><input type="hidden" name="autoRoleIds" value="${r.id}">${r.name} <a href="javascript:void(0)" onclick="this.parentElement.remove()" style="color:var(--text-muted);margin-left:4px">×</a></span>` : '';
+                          }).join('')
+                        : '<span style="color:var(--text-muted);font-size:.85rem">No auto-roles selected</span>'
+                      }
+                    </div>
+                    <select onchange="addAutoRole(this.value, '${guildId}'); this.value=''">
+                      <option value="">Add role...</option>
+                      ${roles.map((r) => `<option value="${r.id}">${r.name}</option>`).join('')}
+                    </select>
+                    <script>
+                      function addAutoRole(roleId, guildId) {
+                        if (!roleId) return;
+                        const container = document.getElementById('welcomeAutoRoles');
+                        const roleName = this.document.querySelector('option[value="' + roleId + '"]')?.text || roleId;
+                        const span = document.createElement('span');
+                        span.className = 'badge badge-secondary';
+                        span.style = 'margin:4px;display:inline-flex;align-items:center;gap:4px;padding:4px 8px';
+                        span.innerHTML = '<input type="hidden" name="autoRoleIds" value="' + roleId + '">' + roleName + ' <a href="javascript:void(0)" onclick="this.parentElement.remove()" style="color:var(--text-muted);margin-left:4px">×</a>';
+                        container.appendChild(span);
+                      }
+                    </script>
+                  </div>
+
+                  <div class="card" style="margin-top:16px">
+                    <div class="card-title">📝 Welcome Embed</div>
+                    <div class="grid-2">
+                      <div class="form-group">
+                        <label>Welcome Channel</label>
+                        <select name="welcomeChannelId" id="welcomeChannelSelect">
+                          <option value="">None (disabled)</option>
+                          ${channels.map((c) => `<option value="${c.id}" ${welcomeConfig.welcomeChannelId === c.id ? 'selected' : ''}>#${c.name}</option>`).join('')}
+                        </select>
+                      </div>
+                    </div>
+
+                    <div class="toggle-row" style="margin-bottom:12px">
+                      <div><div class="toggle-label">Send Welcome Message</div><div class="toggle-desc">Send a message when someone joins</div></div>
+                      <label class="switch">
+                        <input type="checkbox" name="welcomeMessageEnabled" id="welcomeMsgToggle" ${welcomeConfig.welcomeMessageEnabled !== false ? 'checked' : ''} onchange="document.getElementById('welcomeFields').style.display=this.checked?'block':'none'">
+                        <span class="slider"></span>
+                      </label>
+                    </div>
+
+                    <div id="welcomeFields" style="display:${welcomeConfig.welcomeMessageEnabled !== false ? 'block' : 'none'}">
+                      <div class="grid-2">
+                        <div class="form-group">
+                          <label>Embed Title</label>
+                          <input type="text" name="welcomeEmbedTitle" value="${escapeHtml(welcomeConfig.welcomeEmbedTitle || '🎉 Welcome!')}" placeholder="🎉 Welcome!">
+                        </div>
+                        <div class="form-group">
+                          <label>Embed Color</label>
+                          <input type="color" name="welcomeEmbedColor" value="${welcomeConfig.welcomeEmbedColor || '#5865F2'}" style="width:50px;height:38px">
+                        </div>
+                      </div>
+                      <div class="form-group">
+                        <label>Embed Description</label>
+                        <textarea name="welcomeEmbedDescription" rows="3" placeholder="Welcome {user} to {server}!">${escapeHtml(welcomeConfig.welcomeEmbedDescription || 'Welcome {user} to {server}!')}</textarea>
+                        <div style="font-size:.75rem;color:var(--text-muted);margin-top:4px">Variables: {user}, {username}, {usertag}, {server}, {member_count}, {date}, {joined_at}</div>
+                      </div>
+                      <div class="grid-2">
+                        <div class="form-group">
+                          <label>Thumbnail Image URL (optional)</label>
+                          <input type="text" name="welcomeEmbedThumbnail" value="${escapeHtml(welcomeConfig.welcomeEmbedThumbnail || '')}" placeholder="https://... (shows as user avatar)">
+                        </div>
+                        <div class="form-group">
+                          <label>Background Image URL (optional)</label>
+                          <input type="text" name="welcomeEmbedImage" value="${escapeHtml(welcomeConfig.welcomeEmbedImage || '')}" placeholder="https://... (full width image)">
+                        </div>
+                      </div>
+                      <div class="form-group">
+                        <label>Footer Text (optional)</label>
+                        <input type="text" name="welcomeEmbedFooter" value="${escapeHtml(welcomeConfig.welcomeEmbedFooter || '')}" placeholder="Your server name">
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="card" style="margin-top:16px">
+                    <div class="card-title">👋 Leave Message Settings</div>
+                    <div class="toggle-row" style="margin-bottom:12px">
+                      <div><div class="toggle-label">Send Leave Message</div><div class="toggle-desc">Send a message when someone leaves</div></div>
+                      <label class="switch">
+                        <input type="checkbox" name="leaveMessageEnabled" id="leaveMsgToggle" ${welcomeConfig.leaveMessageEnabled ? 'checked' : ''} onchange="document.getElementById('leaveFields').style.display=this.checked?'block':'none'">
+                        <span class="slider"></span>
+                      </label>
+                    </div>
+                    <div id="leaveFields" style="display:${welcomeConfig.leaveMessageEnabled ? 'block' : 'none'}">
+                      <div class="grid-2">
+                        <div class="form-group">
+                          <label>Leave Channel</label>
+                          <select name="leaveChannelId">
+                            <option value="">None</option>
+                            ${channels.map((c) => `<option value="${c.id}" ${welcomeConfig.leaveChannelId === c.id ? 'selected' : ''}>#${c.name}</option>`).join('')}
+                          </select>
+                        </div>
+                        <div class="form-group">
+                          <label>Leave Message</label>
+                          <input type="text" name="leaveEmbedTitle" value="${escapeHtml(welcomeConfig.leaveEmbedTitle || '👋 Member Left')}" placeholder="👋 Member Left">
+                        </div>
+                      </div>
+                      <div class="form-group">
+                        <label>Leave Description</label>
+                        <textarea name="leaveEmbedDescription" rows="2">${escapeHtml(welcomeConfig.leaveEmbedDescription || '{user} left the server.')}</textarea>
+                      </div>
+                    </div>
+                  </div>
+
+                  <button type="submit" class="btn btn-primary" style="margin-top:16px">💾 Save Welcome Settings</button>
                 </form>
               </div>
             </div>
@@ -831,11 +1085,145 @@ export function createWebServer(client: BotClient) {
               </div>
             </div>
 
-            <!-- TICKETS LIST TAB -->
-            <div id="tab-tickets-list" class="tab-content">
+            <div id="tab-ai" class="tab-content">
               <div class="card">
-                <div class="card-title">📝 Recent Tickets</div>
-                <div id="ticketsList">Loading...</div>
+                <div class="card-title">🤖 AI Moderation Settings</div>
+                <p style="color:var(--text-muted);font-size:.88rem;margin-bottom:12px">Configure the AI moderation module. Requires <code>OPENAI_API_KEY</code> in the <code>.env</code> file for AI-powered content analysis. The bot already uses AI for anti-scam moderation when the AI module is active.</p>
+              </div>
+
+              <div class="card">
+                <div class="card-title">🚫 Banned Words (Auto-Moderation)</div>
+                <p style="color:var(--text-muted);font-size:.85rem;margin-bottom:12px">Add custom banned words that will be automatically detected and actioned. Supports multiple languages. Words are checked case-insensitively.</p>
+                
+                <form method="POST" action="/api/guild/${guildId}/bannedwords/add" style="margin-bottom:20px">
+                  <div class="grid-4">
+                    <div class="form-group">
+                      <label>Word/Phrase</label>
+                      <input type="text" name="word" required placeholder="badword" maxlength="100">
+                    </div>
+                    <div class="form-group">
+                      <label>Severity</label>
+                      <select name="severity">
+                        <option value="low">Low</option>
+                        <option value="medium" selected>Medium</option>
+                        <option value="high">High</option>
+                        <option value="critical">Critical</option>
+                      </select>
+                    </div>
+                    <div class="form-group">
+                      <label>Language</label>
+                      <select name="language">
+                        <option value="all">All Languages</option>
+                        <option value="en">English</option>
+                        <option value="it">Italian</option>
+                        <option value="es">Spanish</option>
+                        <option value="fr">French</option>
+                        <option value="de">German</option>
+                        <option value="pt">Portuguese</option>
+                      </select>
+                    </div>
+                    <div class="form-group">
+                      <label>Action</label>
+                      <select name="action">
+                        <option value="warn">Warn</option>
+                        <option value="mute">Mute (1h)</option>
+                        <option value="kick">Kick</option>
+                        <option value="ban">Ban</option>
+                      </select>
+                    </div>
+                  </div>
+                  <button type="submit" class="btn btn-primary">➕ Add Banned Word</button>
+                </form>
+
+                <div id="bannedWordsList"></div>
+                <script>
+                  async function loadBannedWords() {
+                    const list = document.getElementById('bannedWordsList');
+                    if (!list) return;
+                    try {
+                      const res = await fetch('/api/guild/${guildId}/bannedwords');
+                      const data = await res.json();
+                      if (!data.words?.length) {
+                        list.innerHTML = '<p style="color:var(--text-muted)">No banned words configured yet.</p>';
+                        return;
+                      }
+                      list.innerHTML = '<table class="table"><thead><tr><th>Word</th><th>Severity</th><th>Language</th><th>Action</th><th></th></tr></thead><tbody>' +
+                        data.words.map(w => '<tr>' +
+                          '<td><code>' + esc(w.word) + '</code></td>' +
+                          '<td><span class="badge badge-' + (w.severity === 'critical' ? 'danger' : w.severity === 'high' ? 'warn' : 'secondary') + '">' + w.severity + '</span></td>' +
+                          '<td>' + w.language + '</td>' +
+                          '<td>' + w.action + '</td>' +
+                          '<td><a href="/api/guild/${guildId}/bannedwords/delete/' + w._id + '" class="btn btn-ghost btn-sm" onclick="return confirm(\'Delete this word?\')">🗑️</a></td>' +
+                        '</tr>').join('') + '</tbody></table>';
+                    } catch (e) {
+                      list.innerHTML = '<p style="color:#ED4245">Failed to load banned words.</p>';
+                    }
+                  }
+                  function esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+                  loadBannedWords();
+                </script>
+              </div>
+            </div>
+
+            <div id="tab-automations" class="tab-content">
+              <div class="card">
+                <div class="card-title">⚡ IF → THEN Automations</div>
+                <p style="color:var(--muted);font-size:.88rem;margin-bottom:12px">Enable the <strong>Automation</strong> module in Modules. Rules: if the message contains the <strong>keyword</strong> (case-insensitive), the bot replies or deletes the message. Cooldown per rule. For the "Delete" action the bot must have <strong>Manage Messages</strong>.</p>
+                <form method="POST" action="/api/guild/${guildId}/automations" style="margin-bottom:20px">
+                  <div class="grid-2">
+                    <div class="form-group">
+                      <label>Nome regola</label>
+                      <input type="text" name="name" required placeholder="es. Saluto" maxlength="80">
+                    </div>
+                    <div class="form-group">
+                      <label>Parola chiave (contiene)</label>
+                      <input type="text" name="keyword" required placeholder="es. ciao" maxlength="200">
+                    </div>
+                    <div class="form-group">
+                      <label>Azione</label>
+                      <select name="action">
+                        <option value="reply">Rispondi nel canale</option>
+                        <option value="delete">Elimina messaggio</option>
+                      </select>
+                    </div>
+                    <div class="form-group">
+                      <label>Cooldown (secondi)</label>
+                      <input type="number" name="cooldownSeconds" value="30" min="5" max="3600">
+                    </div>
+                  </div>
+                  <div class="form-group">
+                    <label>Response text (if action = Reply)</label>
+                    <textarea name="replyText" rows="2" placeholder="Bot message"></textarea>
+                  </div>
+                  <button type="submit" class="btn btn-primary">Aggiungi regola</button>
+                </form>
+                ${automationRules.length === 0
+                  ? '<p class="placeholder-panel">No rules yet. Add one above.</p>'
+                  : `<table class="table"><thead><tr><th>Name</th><th>Keyword</th><th>Action</th><th>Cooldown</th><th>Status</th><th></th></tr></thead><tbody>
+                    ${automationRules.map((r: any) => `<tr>
+                      <td>${escapeHtml(r.name)}</td>
+                      <td><code>${escapeHtml(r.keyword)}</code></td>
+                      <td>${escapeHtml(r.action)}</td>
+                      <td>${r.cooldownSeconds}s</td>
+                      <td>${r.enabled ? '<span class="badge badge-success">on</span>' : '<span class="badge badge-warn">off</span>'}</td>
+                      <td>
+                        <form method="POST" action="/api/guild/${guildId}/automations/${String(r._id)}/toggle" style="display:inline"><button type="submit" class="btn btn-ghost btn-sm">${r.enabled ? 'Off' : 'On'}</button></form>
+                        <form method="POST" action="/api/guild/${guildId}/automations/${String(r._id)}/delete" style="display:inline" onsubmit="return confirm('Eliminare questa regola?')"><button type="submit" class="btn btn-danger btn-sm">Elimina</button></form>
+                      </td>
+                    </tr>`).join('')}
+                    </tbody></table>`}
+              </div>
+            </div>
+
+            <div id="tab-roadmap" class="tab-content">
+              <div class="card">
+                <div class="card-title">🚀 Roadmap (upcoming features)</div>
+                <ul style="margin-left:18px;color:var(--muted);font-size:.9rem;line-height:1.7">
+                  <li>Visual IF/THEN automations, economy/levels plugins, premium tier</li>
+                  <li>Advanced analytics (hourly graphs, retention, response times)</li>
+                  <li>Audit avanzato con ricerca full-text, webhooks verso Zapier, plugin marketplace</li>
+                  <li>Multi-server overview e notifiche live (WebSocket)</li>
+                </ul>
               </div>
             </div>
 
@@ -863,60 +1251,215 @@ export function createWebServer(client: BotClient) {
         </div>
       </div>
       <script>
-        function removeTag(key, id, el) {
-          el.remove();
-          const input = document.getElementById(key + 'Input');
-          input.value = input.value.split(',').filter(x => x && x !== id).join(',');
-        }
-        function addTag(key, select) {
-          const id = select.value;
-          const text = select.options[select.selectedIndex]?.text;
-          if (!id) return;
-          select.value = '';
-          const input = document.getElementById(key + 'Input');
-          const existing = input.value ? input.value.split(',') : [];
-          if (existing.includes(id)) return;
-          existing.push(id);
-          input.value = existing.join(',');
-          const container = document.getElementById(key + 'Tags');
-          const tag = document.createElement('span');
-          tag.className = 'tag';
-          tag.innerHTML = text + ' <span class="tag-remove" onclick="removeTag(\\''+key+'\\',\\''+id+'\\',this.parentElement)">×</span>';
-          container.appendChild(tag);
-        }
-
-        async function loadTickets() {
-          const el = document.getElementById('ticketsList');
-          if (!el) return;
-          const tab = document.getElementById('tab-tickets-list');
-          if (!tab || !tab.classList.contains('active')) return;
-          try {
-            const res = await fetch('/api/guild/${guildId}/tickets');
-            const data = await res.json();
-            if (!data.tickets.length) { el.innerHTML = '<p style="color:var(--text-muted)">No tickets yet.</p>'; return; }
-            el.innerHTML = '<table class="table"><thead><tr><th>#</th><th>Type</th><th>Status</th><th>User ID</th><th>Created</th></tr></thead><tbody>' +
-              data.tickets.map(t => '<tr><td>#'+t.number+'</td><td>'+t.type+'</td><td><span class="badge badge-'+(t.status==='open'?'success':'danger')+'">'+t.status+'</span></td><td>'+t.userId+'</td><td>'+new Date(t.createdAt).toLocaleDateString()+'</td></tr>').join('') +
-              '</tbody></table>';
-          } catch { el.innerHTML = '<p style="color:var(--text-muted)">Failed to load tickets.</p>'; }
-        }
-
-        document.addEventListener('DOMContentLoaded', () => {
-          const saved = localStorage.getItem('activeTab_'+location.pathname);
-          if (saved && document.getElementById(saved)) {
-            document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
-            document.querySelectorAll('.sidebar-item[data-tab]').forEach(t => t.classList.remove('active'));
-            document.getElementById(saved).classList.add('active');
-            document.querySelector('[data-tab="'+saved+'"]')?.classList.add('active');
-          } else {
-            document.getElementById('tab-modules').classList.add('active');
-            document.querySelector('[data-tab="tab-modules"]').classList.add('active');
+        (function(){
+          const GUILD_ID = '${guildId}';
+          function esc(s){ return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+          function removeTag(key, id, el) {
+            el.remove();
+            const input = document.getElementById(key + 'Input');
+            input.value = input.value.split(',').filter(x => x && x !== id).join(',');
           }
-          loadTickets();
-        });
+          function addTag(key, select) {
+            const id = select.value;
+            const text = select.options[select.selectedIndex]?.text;
+            if (!id) return;
+            select.value = '';
+            const input = document.getElementById(key + 'Input');
+            const existing = input.value ? input.value.split(',') : [];
+            if (existing.includes(id)) return;
+            existing.push(id);
+            input.value = existing.join(',');
+            const container = document.getElementById(key + 'Tags');
+            const tag = document.createElement('span');
+            tag.className = 'tag';
+            tag.innerHTML = text + ' <span class="tag-remove" onclick="removeTag(\\''+key+'\\',\\''+id+'\\',this.parentElement)">×</span>';
+            container.appendChild(tag);
+          }
+          function removeTicketStaff(id, el) {
+            el.remove();
+            const input = document.getElementById('ticketStaffInput');
+            input.value = input.value.split(',').filter(x => x && x !== id).join(',');
+          }
+          function addTicketStaff(select) {
+            const id = select.value;
+            const text = select.options[select.selectedIndex]?.text;
+            if (!id) return;
+            select.value = '';
+            const input = document.getElementById('ticketStaffInput');
+            const existing = input.value ? input.value.split(',') : [];
+            if (existing.includes(id)) return;
+            existing.push(id);
+            input.value = existing.join(',');
+            const container = document.getElementById('ticketStaffTags');
+            const tag = document.createElement('span');
+            tag.className = 'tag';
+            tag.innerHTML = text + ' <span class="tag-remove" onclick="removeTicketStaff(\\''+id+'\\',this.parentElement)">×</span>';
+            container.appendChild(tag);
+          }
+          window.removeTag = removeTag; window.addTag = addTag;
+          window.removeTicketStaff = removeTicketStaff; window.addTicketStaff = addTicketStaff;
 
-        document.querySelectorAll('.sidebar-item[data-tab]').forEach(item => {
-          item.addEventListener('click', () => setTimeout(loadTickets, 100));
-        });
+          window.phoenixSyncPreview = function() {
+            const t = document.getElementById('fldEmbedTitle');
+            const d = document.getElementById('fldEmbedDesc');
+            const c = document.getElementById('embedColorText');
+            const pv = document.getElementById('embedLivePreview');
+            const pt = document.getElementById('pvTitle');
+            const pd = document.getElementById('pvDesc');
+            if (pt && t) pt.textContent = t.value || '';
+            if (pd && d) pd.textContent = d.value || '';
+            if (pv && c) pv.style.borderLeftColor = c.value || '#5865F2';
+          };
+          document.addEventListener('DOMContentLoaded', function() {
+            document.getElementById('fldEmbedTitle')?.addEventListener('input', window.phoenixSyncPreview);
+            document.getElementById('fldEmbedDesc')?.addEventListener('input', window.phoenixSyncPreview);
+            var TB_INIT = ${JSON.stringify(
+              (ticketConfig.buttons || []).map((b: { label?: string; emoji?: string; type?: string; style?: number }) => ({
+                label: String(b.label ?? ''),
+                emoji: String(b.emoji ?? ''),
+                type: String(b.type ?? 'support'),
+                style: Number(b.style) || 1,
+              }))
+            )};
+            function tbSync() {
+              var field = document.getElementById('ticketButtonsJsonField');
+              var box = document.getElementById('ticketBtnBuilder');
+              if (!field || !box) return;
+              var rows = box.querySelectorAll('.ticket-btn-row');
+              var arr = [];
+              rows.forEach(function(row) {
+                var label = row.querySelector('[data-f="label"]');
+                var emoji = row.querySelector('[data-f="emoji"]');
+                var typeEl = row.querySelector('[data-f="type"]');
+                var styleEl = row.querySelector('[data-f="style"]');
+                var lab = (label && label.value) ? label.value.trim() : '';
+                if (!lab) return;
+                var typ = (typeEl && typeEl.value) ? typeEl.value.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '') : 'support';
+                if (!typ) typ = 'support';
+                var st = styleEl ? parseInt(styleEl.value, 10) : 1;
+                if (!st || st < 1 || st > 4) st = 1;
+                arr.push({ label: lab, emoji: (emoji && emoji.value) ? emoji.value.trim() : '', type: typ, style: st });
+              });
+              field.value = JSON.stringify(arr);
+            }
+            function tbRowHtml(b) {
+              b = b || { label: '', emoji: '', type: 'support', style: 1 };
+              var st = parseInt(String(b.style), 10) || 1;
+              if (st < 1 || st > 4) st = 1;
+              function sel(n) { return st === n ? ' selected' : ''; }
+              return '<div class="ticket-btn-row">' +
+                '<div class="form-group" style="margin-bottom:8px"><label>Etichetta</label><input data-f="label" type="text" value="'+esc(b.label)+'" maxlength="80"></div>' +
+                '<div class="form-group" style="margin-bottom:8px"><label>Emoji (opz.)</label><input data-f="emoji" type="text" value="'+esc(b.emoji)+'" placeholder="🎫"></div>' +
+                '<div class="form-group" style="margin-bottom:8px"><label>ID tipo (slug)</label><input data-f="type" type="text" value="'+esc(b.type)+'" placeholder="support"></div>' +
+                '<div class="form-group" style="margin-bottom:8px"><label>Stile</label><select data-f="style">' +
+                '<option value="1"'+sel(1)+'>Primario</option><option value="2"'+sel(2)+'>Secondario</option><option value="3"'+sel(3)+'>Success</option><option value="4"'+sel(4)+'>Danger</option>' +
+                '</select></div>' +
+                '<button type="button" class="btn btn-danger btn-sm tb-remove" style="margin-top:4px">Rimuovi</button></div>';
+            }
+            function tbWire(row) {
+              row.querySelectorAll('input,select').forEach(function(i){ i.addEventListener('input', tbSync); i.addEventListener('change', tbSync); });
+              row.querySelector('.tb-remove').addEventListener('click', function(){ row.remove(); tbSync(); });
+            }
+            function tbRender() {
+              var box = document.getElementById('ticketBtnBuilder');
+              if (!box) return;
+              box.innerHTML = '';
+              (TB_INIT || []).forEach(function(b) {
+                var wrap = document.createElement('div');
+                wrap.innerHTML = tbRowHtml(b);
+                var row = wrap.firstElementChild;
+                if (row) { box.appendChild(row); tbWire(row); }
+              });
+              tbSync();
+            }
+            document.getElementById('ticketBtnAdd')?.addEventListener('click', function() {
+              var box = document.getElementById('ticketBtnBuilder');
+              if (!box || box.querySelectorAll('.ticket-btn-row').length >= 25) return;
+              var wrap = document.createElement('div');
+              wrap.innerHTML = tbRowHtml({ label: 'Button', emoji: '', type: 'custom', style: 1 });
+              var row = wrap.firstElementChild;
+              if (row) { box.appendChild(row); tbWire(row); tbSync(); }
+            });
+            document.getElementById('ticketConfigForm')?.addEventListener('submit', function(){ tbSync(); });
+            tbRender();
+          });
+
+          let selectedId = null;
+          async function refreshList() {
+            const list = document.getElementById('ticketInboxList');
+            if (!list) return;
+            try {
+              const res = await fetch('/api/guild/'+GUILD_ID+'/tickets?limit=80');
+              const data = await res.json();
+              if (!data.tickets?.length) { list.innerHTML = '<div style="padding:12px;color:var(--muted)">No tickets.</div>'; return; }
+              list.innerHTML = data.tickets.map(function(t) {
+                const active = selectedId === String(t.id) ? ' active' : '';
+                const badge = t.status === 'open' ? 'badge-success' : (t.status === 'closed' ? 'badge-danger' : 'badge-warn');
+                return '<div class="inbox-item'+active+'" data-id="'+t.id+'"><span><strong>#'+t.number+'</strong> · '+esc(t.type)+'</span><span class="badge '+badge+'">'+esc(t.status)+'</span></div>';
+              }).join('');
+              list.querySelectorAll('.inbox-item').forEach(function(el) {
+                el.addEventListener('click', function() { loadDetail(el.getAttribute('data-id')); });
+              });
+            } catch {
+              list.innerHTML = '<div style="padding:12px;color:var(--muted)">Errore caricamento lista.</div>';
+            }
+          }
+          async function loadDetail(id) {
+            selectedId = id;
+            const detail = document.getElementById('ticketInboxDetail');
+            if (!detail || !id) return;
+            detail.innerHTML = '<div style="color:var(--muted)">Caricamento…</div>';
+            try {
+              const res = await fetch('/api/guild/'+GUILD_ID+'/tickets/'+id);
+              const t = await res.json();
+              if (!res.ok) { detail.innerHTML = '<div class="alert alert-danger">'+esc(t.error||'Errore')+'</div>'; refreshList(); return; }
+              const msgs = (t.ticket.messages||[]).slice(-50).map(function(m) {
+                return '<div class="msg-line"><div class="msg-meta">'+esc(m.authorTag)+' · '+new Date(m.timestamp).toLocaleString()+'</div><div>'+esc(m.content)+'</div></div>';
+              }).join('') || '<div style="color:var(--muted)">No messages saved in DB for this thread.</div>';
+              const actions = [];
+              if (t.ticket.status === 'open') {
+                actions.push('<form method="POST" action="/api/guild/'+GUILD_ID+'/tickets/'+id+'/claim" style="display:inline"><button class="btn btn-secondary btn-sm" type="submit">Claim</button></form>');
+                actions.push('<form method="POST" action="/api/guild/'+GUILD_ID+'/tickets/'+id+'/close" style="display:inline" onsubmit="return confirm(\\'Chiudere questo ticket?\\')"><button class="btn btn-danger btn-sm" type="submit">Chiudi</button></form>');
+              }
+              actions.push('<button type="button" class="btn btn-ghost btn-sm" id="aiInsightBtn">AI · summary &amp; classifica</button>');
+              const reply = t.ticket.status === 'open'
+                ? '<form method="POST" action="/api/guild/'+GUILD_ID+'/tickets/'+id+'/message" style="margin-top:12px">'+
+                  '<div class="form-group"><label>Message in thread</label><textarea name="content" rows="3" required placeholder="Visible in Discord ticket"></textarea></div>'+
+                  '<button class="btn btn-primary btn-sm" type="submit">Send</button></form>' : '';
+              detail.innerHTML = '<div><strong>#'+t.ticket.number+'</strong> · '+esc(t.ticket.type)+' · User <code>'+esc(t.ticket.userId)+'</code>'+
+                (t.ticket.claimedBy ? ' · Claim: <code>'+esc(t.ticket.claimedBy)+'</code>' : '')+'</div>'+
+                '<div style="margin:10px 0;display:flex;gap:8px;flex-wrap:wrap">'+actions.join('')+'</div>'+
+                '<div class="msg-log">'+msgs+'</div>'+reply+
+                '<div id="aiInsightOut" class="card" style="margin-top:12px;display:none;padding:12px"></div>';
+              document.getElementById('aiInsightBtn')?.addEventListener('click', async function() {
+                const out = document.getElementById('aiInsightOut');
+                if (!out) return;
+                out.style.display = 'block';
+                out.innerHTML = '<div style="color:var(--muted)">Analisi in corso…</div>';
+                try {
+                  const ir = await fetch('/api/guild/'+GUILD_ID+'/tickets/'+id+'/insights');
+                  const j = await ir.json();
+                  if (!ir.ok) { out.innerHTML = '<div class="alert alert-danger">'+esc(j.error||'AI error')+'</div>'; return; }
+                  out.innerHTML = '<div class="card-title" style="margin-bottom:8px;font-size:.9rem">Esito AI</div>'+
+                    '<div style="font-size:.85rem"><strong>Classifica:</strong> '+esc(j.classification)+'</div>'+
+                    '<div style="font-size:.85rem;margin-top:6px"><strong>Riassunto:</strong> '+esc(j.summary)+'</div>'+
+                    '<div style="font-size:.85rem;margin-top:6px"><strong>Suggerimento staff:</strong> '+esc(j.staffHint)+'</div>';
+                } catch {
+                  out.innerHTML = '<div class="alert alert-danger">Impossibile contattare il servizio AI.</div>';
+                }
+              });
+            } catch {
+              detail.innerHTML = '<div class="alert alert-danger">Errore caricamento ticket.</div>';
+            }
+            refreshList();
+          }
+          document.addEventListener('DOMContentLoaded', function() {
+            refreshList();
+            window.addEventListener('phoenik:tab', function(e) {
+              if (e.detail === 'tab-tickets') refreshList();
+            });
+          });
+        })();
       </script>
     `, req.user as any));
   });
@@ -924,33 +1467,160 @@ export function createWebServer(client: BotClient) {
   app.post('/api/guild/:id/modules', requireAuth, async (req, res) => {
     const guildId = req.params.id;
     if (!isGuildAdmin(req, guildId)) { res.status(403).json({ error: 'Forbidden' }); return; }
-    const moduleKeys = ['ticket','giveaway','verification','antirAid','antinuke','antilink','logging','youtube','twitch','roblox','ai','suggestions','reactionRoles','stats','schedule','backup','minigames','moderation'];
+    const moduleKeys = ['ticket','giveaway','verification','antirAid','antinuke','antilink','logging','youtube','twitch','roblox','ai','suggestions','reactionRoles','stats','schedule','backup','minigames','moderation','automation'];
     const updates: Record<string, boolean> = {};
     for (const key of moduleKeys) {
       updates[`modules.${key}`] = key in req.body;
     }
     await GuildModel.findOneAndUpdate({ guildId }, updates, { upsert: true });
     invalidateGuildCache(guildId);
-    res.redirect(`/guild/${guildId}?saved=1#modules`);
+    res.redirect(guildRedirect(guildId, { saved: '1', tab: 'tab-modules' }));
+  });
+
+  app.post('/api/guild/:id/automations', requireAuth, async (req, res) => {
+    const guildId = req.params.id;
+    if (!isGuildAdmin(req, guildId)) { res.status(403).json({ error: 'Forbidden' }); return; }
+    const b = req.body as Record<string, string>;
+    const name = String(b.name || '').trim().slice(0, 80);
+    const keyword = String(b.keyword || '').trim().toLowerCase().slice(0, 200);
+    const action = b.action === 'delete' ? 'delete' : 'reply';
+    const replyText = String(b.replyText || '').slice(0, 2000);
+    const cooldownSeconds = Math.min(3600, Math.max(5, parseInt(String(b.cooldownSeconds), 10) || 30));
+    if (!name || !keyword) {
+      res.redirect(guildRedirect(guildId, { error: 'Nome+e+keyword+richiesti', tab: 'tab-automations' }));
+      return;
+    }
+    await AutomationRuleModel.create({
+      guildId,
+      name,
+      keyword,
+      enabled: true,
+      action,
+      replyText,
+      cooldownSeconds,
+    });
+    invalidateGuildCache(guildId);
+    res.redirect(guildRedirect(guildId, { saved: '1', tab: 'tab-automations' }));
+  });
+
+  app.post('/api/guild/:id/automations/:ruleId/delete', requireAuth, async (req, res) => {
+    const guildId = req.params.id;
+    if (!isGuildAdmin(req, guildId)) { res.status(403).json({ error: 'Forbidden' }); return; }
+    await AutomationRuleModel.deleteOne({ _id: req.params.ruleId, guildId });
+    invalidateGuildCache(guildId);
+    res.redirect(guildRedirect(guildId, { saved: '1', tab: 'tab-automations' }));
+  });
+
+  app.post('/api/guild/:id/automations/:ruleId/toggle', requireAuth, async (req, res) => {
+    const guildId = req.params.id;
+    if (!isGuildAdmin(req, guildId)) { res.status(403).json({ error: 'Forbidden' }); return; }
+    const rule = await AutomationRuleModel.findOne({ _id: req.params.ruleId, guildId });
+    if (rule) {
+      rule.enabled = !rule.enabled;
+      await rule.save();
+    }
+    invalidateGuildCache(guildId);
+    res.redirect(guildRedirect(guildId, { saved: '1', tab: 'tab-automations' }));
+  });
+
+  // Banned Words API
+  app.get('/api/guild/:id/bannedwords', requireAuth, async (req, res) => {
+    const guildId = req.params.id;
+    if (!isGuildAdmin(req, guildId)) { res.status(403).json({ error: 'Forbidden' }); return; }
+    const words = await BannedWordModel.find({ guildId }).sort({ createdAt: -1 });
+    res.json({ words });
+  });
+
+  app.post('/api/guild/:id/bannedwords/add', requireAuth, async (req, res) => {
+    const guildId = req.params.id;
+    if (!isGuildAdmin(req, guildId)) { res.status(403).json({ error: 'Forbidden' }); return; }
+    const { word, severity, language, action } = req.body as Record<string, string>;
+    
+    if (!word || !word.trim()) {
+      res.redirect(guildRedirect(guildId, { error: 'Word is required', tab: 'tab-ai' }));
+      return;
+    }
+
+    const cleanWord = word.trim().toLowerCase();
+    const existing = await BannedWordModel.findOne({ guildId, word: cleanWord });
+    if (existing) {
+      res.redirect(guildRedirect(guildId, { error: 'Word already exists', tab: 'tab-ai' }));
+      return;
+    }
+
+    await BannedWordModel.create({
+      guildId,
+      word: cleanWord,
+      severity: severity || 'medium',
+      language: language || 'all',
+      action: action || 'warn',
+      enabled: true,
+    });
+
+    AIModeration.clearCache(guildId);
+    invalidateGuildCache(guildId);
+    res.redirect(guildRedirect(guildId, { saved: '1', tab: 'tab-ai' }));
+  });
+
+  app.get('/api/guild/:id/bannedwords/delete/:wordId', requireAuth, async (req, res) => {
+    const guildId = req.params.id;
+    if (!isGuildAdmin(req, guildId)) { res.status(403).json({ error: 'Forbidden' }); return; }
+    
+    await BannedWordModel.findByIdAndDelete(req.params.wordId);
+    AIModeration.clearCache(guildId);
+    invalidateGuildCache(guildId);
+    res.redirect(guildRedirect(guildId, { saved: '1', tab: 'tab-ai' }));
   });
 
   app.post('/api/guild/:id/general', requireAuth, async (req, res) => {
     const guildId = req.params.id;
     if (!isGuildAdmin(req, guildId)) { res.status(403).json({ error: 'Forbidden' }); return; }
-    const b = req.body;
-    await GuildModel.findOneAndUpdate({ guildId }, {
-      logChannel: b.logChannel || null,
-      modLogChannel: b.modLogChannel || null,
-      suggestionsChannel: b.suggestionsChannel || null,
-      'autoModThresholds.warnMuteThreshold': parseInt(b.warnMuteThreshold) || 3,
-      'autoModThresholds.warnBanThreshold': parseInt(b.warnBanThreshold) || 5,
-      'autoModThresholds.raidJoins': parseInt(b.raidJoins) || 10,
-      'autoModThresholds.raidSeconds': parseInt(b.raidSeconds) || 5,
-      'autoModThresholds.nukeChannelDeletes': parseInt(b.nukeChannelDeletes) || 3,
-      'autoModThresholds.nukeBans': parseInt(b.nukeBans) || 5,
-    }, { upsert: true });
+    const b = req.body as Record<string, unknown>;
+    const update: Record<string, unknown> = {};
+    const pick = (key: string) => Object.prototype.hasOwnProperty.call(b, key);
+
+    if (pick('logChannel')) update.logChannel = String(b['logChannel'] ?? '') || null;
+    if (pick('modLogChannel')) update.modLogChannel = String(b['modLogChannel'] ?? '') || null;
+    if (pick('suggestionsChannel')) update.suggestionsChannel = String(b['suggestionsChannel'] ?? '') || null;
+
+    if (pick('warnMuteThreshold')) {
+      update['autoModThresholds.warnMuteThreshold'] = Math.min(Math.max(parseInt(String(b['warnMuteThreshold']), 10) || 3, 1), 20);
+    }
+    if (pick('warnBanThreshold')) {
+      update['autoModThresholds.warnBanThreshold'] = Math.min(Math.max(parseInt(String(b['warnBanThreshold']), 10) || 5, 1), 20);
+    }
+    if (pick('raidJoins')) {
+      update['autoModThresholds.raidJoins'] = Math.min(Math.max(parseInt(String(b['raidJoins']), 10) || 10, 2), 50);
+    }
+    if (pick('raidSeconds')) {
+      update['autoModThresholds.raidSeconds'] = Math.min(Math.max(parseInt(String(b['raidSeconds']), 10) || 5, 1), 60);
+    }
+    if (pick('nukeChannelDeletes')) {
+      update['autoModThresholds.nukeChannelDeletes'] = Math.min(Math.max(parseInt(String(b['nukeChannelDeletes']), 10) || 3, 1), 20);
+    }
+    if (pick('nukeBans')) {
+      update['autoModThresholds.nukeBans'] = Math.min(Math.max(parseInt(String(b['nukeBans']), 10) || 5, 1), 30);
+    }
+    if (pick('nukeRoleDeletes')) {
+      update['autoModThresholds.nukeRoleDeletes'] = Math.min(Math.max(parseInt(String(b['nukeRoleDeletes']), 10) || 3, 1), 30);
+    }
+    if (pick('nukeWindowSeconds')) {
+      update['autoModThresholds.nukeWindowSeconds'] = Math.min(Math.max(parseInt(String(b['nukeWindowSeconds']), 10) || 30, 5), 300);
+    }
+    if (pick('muteDurationMinutes')) {
+      const muteMinutes = Math.min(Math.max(parseInt(String(b['muteDurationMinutes']), 10) || 60, 1), 10080);
+      update['autoModThresholds.muteDuration'] = muteMinutes * 60 * 1000;
+    }
+    if (pick('raidMinAccountAgeHours')) {
+      update['autoModThresholds.raidMinAccountAgeHours'] = Math.min(
+        8760,
+        Math.max(0, parseInt(String(b['raidMinAccountAgeHours']), 10) || 0)
+      );
+    }
+
+    await GuildModel.findOneAndUpdate({ guildId }, update, { upsert: true });
     invalidateGuildCache(guildId);
-    res.redirect(`/guild/${guildId}?saved=1`);
+    res.redirect(guildRedirect(guildId, { saved: '1' }));
   });
 
   app.post('/api/guild/:id/roles', requireAuth, async (req, res) => {
@@ -989,41 +1659,53 @@ export function createWebServer(client: BotClient) {
     };
     const embedColor = normalizeColor(b.embedColorText || b.embedColor);
     const omEmbedColor = normalizeColor(b.openMessageEmbedColorText || b.openMessageEmbedColor);
-    const staffRole = b.staffRole ? [b.staffRole] : [];
+    const ticketStaffRoles = String(b.staffRoles ?? '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const buttonsParsed = parseTicketButtonsJson(
+      typeof b.ticketButtonsJson === 'string' ? b.ticketButtonsJson : undefined
+    );
     await TicketConfigModel.findOneAndUpdate({ guildId }, {
       embedTitle: b.embedTitle || '🎫 Support Tickets',
       embedDescription: b.embedDescription || 'Click a button to open a ticket.',
       embedColor,
-      embedImage: b.embedImage || null,
-      embedThumbnail: b.embedThumbnail || null,
+      embedImage: safeEmbedMediaUrl(String(b.embedImage ?? '')) ?? null,
+      embedThumbnail: safeEmbedMediaUrl(String(b.embedThumbnail ?? '')) ?? null,
       embedFooter: b.embedFooter || null,
       threadNameTemplate: b.threadNameTemplate || '{type}-{username}',
       openMessageTemplate: b.openMessageTemplate || 'Hello {user}! Staff will be with you shortly.',
-      autoCloseHours: parseInt(b.autoCloseHours) || 48,
+      autoCloseHours: parseInt(String(b.autoCloseHours), 10) || 48,
       openMessageIsEmbed: 'openMessageIsEmbed' in b,
       openMessageEmbedTitle: b.openMessageEmbedTitle || '🎫 Ticket #{ticket_number}',
       openMessageEmbedColor: omEmbedColor,
-      openMessageEmbedImage: b.openMessageEmbedImage || null,
-      openMessageEmbedThumbnail: b.openMessageEmbedThumbnail || null,
+      openMessageEmbedImage: safeEmbedMediaUrl(String(b.openMessageEmbedImage ?? '')) ?? null,
+      openMessageEmbedThumbnail: safeEmbedMediaUrl(String(b.openMessageEmbedThumbnail ?? '')) ?? null,
       openMessageEmbedFooter: b.openMessageEmbedFooter || null,
       openMessageEmbedAuthor: b.openMessageEmbedAuthor || null,
-      staffRoles: staffRole,
+      staffRoles: ticketStaffRoles,
       logChannelId: b.logChannel || null,
+      buttons: buttonsParsed,
     }, { upsert: true });
-    res.redirect(`/guild/${guildId}?saved=1`);
+    // Save ticket category to Guild model
+    await GuildModel.findOneAndUpdate({ guildId }, {
+      ticketCategory: b.ticketCategory || null,
+    }, { upsert: true });
+    invalidateGuildCache(guildId);
+    res.redirect(guildRedirect(guildId, { saved: '1', tab: 'tab-tickets' }));
   });
 
   app.post('/api/guild/:id/ticket/panel', requireAuth, async (req, res) => {
     const guildId = req.params.id;
     if (!isGuildAdmin(req, guildId)) { res.status(403).json({ error: 'Forbidden' }); return; }
     const channelId = req.body.channelId;
-    if (!channelId) { res.redirect(`/guild/${guildId}?error=No+channel+selected`); return; }
+    if (!channelId) { res.redirect(guildRedirect(guildId, { error: 'No+channel+selected', tab: 'tab-tickets' })); return; }
 
     const guild = client.guilds.cache.get(guildId);
-    if (!guild) { res.redirect(`/guild/${guildId}?error=Guild+not+found`); return; }
+    if (!guild) { res.redirect(guildRedirect(guildId, { error: 'Guild+not+found', tab: 'tab-tickets' })); return; }
 
     const channel = guild.channels.cache.get(channelId) as any;
-    if (!channel?.isTextBased()) { res.redirect(`/guild/${guildId}?error=Invalid+channel`); return; }
+    if (!channel?.isTextBased()) { res.redirect(guildRedirect(guildId, { error: 'Invalid+channel', tab: 'tab-tickets' })); return; }
 
     const ticketConfig = await getTicketConfig(guildId);
     const { EmbedBuilder, ButtonBuilder, ButtonStyle, ActionRowBuilder } = await import('discord.js');
@@ -1034,17 +1716,13 @@ export function createWebServer(client: BotClient) {
       .setDescription(ticketConfig.embedDescription)
       .setTimestamp();
 
-    if (ticketConfig.embedImage) embed.setImage(ticketConfig.embedImage);
-    if (ticketConfig.embedThumbnail) embed.setThumbnail(ticketConfig.embedThumbnail);
+    const panelImg = safeEmbedMediaUrl(ticketConfig.embedImage);
+    if (panelImg) embed.setImage(panelImg);
+    const panelThumb = safeEmbedMediaUrl(ticketConfig.embedThumbnail);
+    if (panelThumb) embed.setThumbnail(panelThumb);
     if (ticketConfig.embedFooter) embed.setFooter({ text: ticketConfig.embedFooter });
 
-    const buttons = ticketConfig.buttons.map((b) =>
-      new ButtonBuilder()
-        .setCustomId(`ticket:open:${b.type}`)
-        .setLabel(b.label)
-        .setEmoji(b.emoji)
-        .setStyle(b.style)
-    );
+    const buttons = buildTicketOpenButtons(normalizeTicketButtons(ticketConfig.buttons as unknown));
 
     const rows: any[] = [];
     for (let i = 0; i < buttons.length; i += 5) {
@@ -1057,27 +1735,122 @@ export function createWebServer(client: BotClient) {
         panelChannelId: channelId,
         panelMessageId: msg.id,
       });
-      res.redirect(`/guild/${guildId}?saved=1`);
+      res.redirect(guildRedirect(guildId, { saved: '1', tab: 'tab-tickets' }));
     } catch (err) {
       logger.error('Failed to send ticket panel:', err instanceof Error ? err : new Error(String(err)));
-      res.redirect(`/guild/${guildId}?error=Failed+to+send+panel`);
+      res.redirect(guildRedirect(guildId, { error: 'Failed+to+send+panel', tab: 'tab-tickets' }));
     }
   });
 
   app.get('/api/guild/:id/tickets', requireAuth, async (req, res) => {
     const guildId = req.params.id;
     if (!isGuildAdmin(req, guildId)) { res.status(403).json({ error: 'Forbidden' }); return; }
-    const page = parseInt(req.query.page as string || '1', 10);
-    const limit = 20;
+    const lim = Math.min(Math.max(parseInt(String(req.query.limit ?? '40'), 10) || 40, 1), 200);
+    const page = parseInt(String(req.query.page ?? '1'), 10) || 1;
     const tickets = await TicketModel.find({ guildId })
       .sort({ createdAt: -1 })
-      .skip((page - 1) * limit)
-      .limit(limit);
-    res.json({ tickets: tickets.map((t) => ({
-      id: t._id, number: t.ticketNumber, type: t.type,
-      status: t.status, userId: t.userId, claimedBy: t.claimedBy,
-      createdAt: t.createdAt, closedAt: t.closedAt,
-    }))});
+      .skip(Math.max(0, page - 1) * lim)
+      .limit(lim);
+    res.json({
+      tickets: tickets.map((t) => ({
+        id: String(t._id),
+        number: t.ticketNumber,
+        type: t.type,
+        status: t.status,
+        userId: t.userId,
+        claimedBy: t.claimedBy,
+        createdAt: t.createdAt,
+        closedAt: t.closedAt,
+      })),
+    });
+  });
+
+  app.get('/api/guild/:id/tickets/:ticketId', requireAuth, async (req, res) => {
+    const guildId = req.params.id;
+    if (!isGuildAdmin(req, guildId)) { res.status(403).json({ error: 'Forbidden' }); return; }
+    const ticket = await TicketModel.findOne({ _id: req.params.ticketId, guildId });
+    if (!ticket) { res.status(404).json({ error: 'Not found' }); return; }
+    res.json({
+      ticket: {
+        id: String(ticket._id),
+        number: ticket.ticketNumber,
+        type: ticket.type,
+        status: ticket.status,
+        userId: ticket.userId,
+        claimedBy: ticket.claimedBy,
+        threadId: ticket.threadId,
+        messages: ticket.messages,
+        createdAt: ticket.createdAt,
+        closedAt: ticket.closedAt,
+      },
+    });
+  });
+
+  app.get('/api/guild/:id/tickets/:ticketId/insights', requireAuth, async (req, res) => {
+    const guildId = req.params.id;
+    if (!isGuildAdmin(req, guildId)) { res.status(403).json({ error: 'Forbidden' }); return; }
+    const ticket = await TicketModel.findOne({ _id: req.params.ticketId, guildId });
+    if (!ticket) { res.status(404).json({ error: 'Not found' }); return; }
+    const { TicketInsights } = await import('../modules/ai/TicketInsights');
+    const lines = ticket.messages.map((m) => ({ authorTag: m.authorTag, content: m.content }));
+    const insight = await TicketInsights.analyzeTranscript(lines);
+    res.json(insight);
+  });
+
+  app.post('/api/guild/:id/tickets/:ticketId/claim', requireAuth, async (req, res) => {
+    const guildId = req.params.id;
+    const user = req.user as { id: string };
+    if (!isGuildAdmin(req, guildId)) { res.status(403).send('Forbidden'); return; }
+    await TicketModel.findOneAndUpdate(
+      { _id: req.params.ticketId, guildId, status: 'open' },
+      { claimedBy: user.id }
+    );
+    res.redirect(guildRedirect(guildId, { saved: '1', tab: 'tab-tickets' }));
+  });
+
+  app.post('/api/guild/:id/tickets/:ticketId/close', requireAuth, async (req, res) => {
+    const guildId = req.params.id;
+    const user = req.user as { id: string };
+    if (!isGuildAdmin(req, guildId)) { res.status(403).send('Forbidden'); return; }
+    const guild = client.guilds.cache.get(guildId);
+    const ticket = await TicketModel.findOne({ _id: req.params.ticketId, guildId });
+    if (!guild || !ticket?.threadId) {
+      res.redirect(guildRedirect(guildId, { error: 'ticket', tab: 'tab-tickets' }));
+      return;
+    }
+    const ch = await guild.channels.fetch(ticket.threadId).catch(() => null);
+    if (!ch?.isThread()) {
+      res.redirect(guildRedirect(guildId, { error: 'thread', tab: 'tab-tickets' }));
+      return;
+    }
+    await TicketManager.closeTicket(ch, user.id, guild);
+    res.redirect(guildRedirect(guildId, { saved: '1', tab: 'tab-tickets' }));
+  });
+
+  app.post('/api/guild/:id/tickets/:ticketId/message', requireAuth, async (req, res) => {
+    const guildId = req.params.id;
+    const user = req.user as { id: string; username?: string };
+    if (!isGuildAdmin(req, guildId)) { res.status(403).send('Forbidden'); return; }
+    const content = String(req.body.content ?? '').trim();
+    if (!content) {
+      res.redirect(guildRedirect(guildId, { error: 'empty_message', tab: 'tab-tickets' }));
+      return;
+    }
+    const guild = client.guilds.cache.get(guildId);
+    const ticket = await TicketModel.findOne({ _id: req.params.ticketId, guildId, status: 'open' });
+    if (!guild || !ticket?.threadId) {
+      res.redirect(guildRedirect(guildId, { error: 'ticket', tab: 'tab-tickets' }));
+      return;
+    }
+    const ch = await guild.channels.fetch(ticket.threadId).catch(() => null);
+    if (!ch?.isTextBased()) {
+      res.redirect(guildRedirect(guildId, { error: 'channel', tab: 'tab-tickets' }));
+      return;
+    }
+    const tag = user.username ?? user.id;
+    await ch.send({ content: `**[Staff · ${tag}]** ${content}` }).catch(() => null);
+    await TicketManager.trackMessage(ticket.threadId!, user.id, tag, content, []);
+    res.redirect(guildRedirect(guildId, { saved: '1', tab: 'tab-tickets' }));
   });
 
   app.post('/api/guild/:id/module', requireAuth, async (req, res) => {
@@ -1096,7 +1869,44 @@ export function createWebServer(client: BotClient) {
     await GuildModel.findOneAndUpdate({ guildId }, {
       verifyMode: b.verifyMode || null,
       verifyRole: b.verifyRole || null,
+      unverifiedRole: b.unverifiedRole || null,
     }, { upsert: true });
+    invalidateGuildCache(guildId);
+    res.redirect(`/guild/${guildId}?saved=1`);
+  });
+
+  // Welcome & Auto-role settings
+  app.post('/api/guild/:id/welcome', requireAuth, async (req, res) => {
+    const guildId = req.params.id;
+    if (!isGuildAdmin(req, guildId)) { res.status(403).json({ error: 'Forbidden' }); return; }
+    const b = req.body;
+    
+    // Get autoRoleIds - can be array or single value
+    let autoRoleIds: string[] = [];
+    if (b.autoRoleIds) {
+      autoRoleIds = Array.isArray(b.autoRoleIds) ? b.autoRoleIds : [b.autoRoleIds];
+      autoRoleIds = autoRoleIds.filter(Boolean);
+    }
+
+    const welcomeConfig = {
+      // Handle array values - take first if array
+      welcomeChannelId: Array.isArray(b.welcomeChannelId) ? b.welcomeChannelId[0] : (b.welcomeChannelId || null),
+      welcomeMessageEnabled: b.welcomeMessageEnabled === 'on',
+      welcomeEmbedTitle: b.welcomeEmbedTitle || '🎉 Welcome!',
+      welcomeEmbedDescription: b.welcomeEmbedDescription || 'Welcome {user} to {server}!',
+      welcomeEmbedColor: b.welcomeEmbedColor || '#5865F2',
+      welcomeEmbedImage: b.welcomeEmbedImage || null,
+      welcomeEmbedThumbnail: b.welcomeEmbedThumbnail || null,
+      welcomeEmbedFooter: b.welcomeEmbedFooter || null,
+      leaveMessageEnabled: b.leaveMessageEnabled === 'on',
+      leaveChannelId: Array.isArray(b.leaveChannelId) ? b.leaveChannelId[0] : (b.leaveChannelId || null),
+      leaveEmbedTitle: b.leaveEmbedTitle || '👋 Member Left',
+      leaveEmbedDescription: b.leaveEmbedDescription || '{user} left the server.',
+      autoRoleIds,
+      autoRoleDelay: parseInt(b.autoRoleDelay) || 0,
+    };
+
+    await WelcomeConfigModel.findOneAndUpdate({ guildId }, welcomeConfig, { upsert: true });
     invalidateGuildCache(guildId);
     res.redirect(`/guild/${guildId}?saved=1`);
   });
@@ -1158,9 +1968,42 @@ export function createWebServer(client: BotClient) {
     res.redirect(`/guild/${guildId}?saved=1`);
   });
 
-  return app;
-}
+  function requireApiKey(req: express.Request, res: express.Response, next: express.NextFunction) {
+    const key = config.dashboardApiKey;
+    if (!key) {
+      res.status(503).json({ error: 'DASHBOARD_API_KEY not configured' });
+      return;
+    }
+    const auth = req.headers.authorization;
+    const bearer = typeof auth === 'string' && auth.startsWith('Bearer ') ? auth.slice(7) : '';
+    const xk = req.headers['x-api-key'];
+    const xkStr = Array.isArray(xk) ? xk[0] : xk;
+    if (bearer === key || (xkStr && xkStr === key)) {
+      next();
+      return;
+    }
+    res.status(401).json({ error: 'Unauthorized' });
+  }
 
-function escapeHtml(str: string): string {
-  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  app.get('/api/v1/guild/:id/audit', requireApiKey, async (req, res) => {
+    const guildId = req.params.id;
+    if (!client.guilds.cache.has(guildId)) {
+      res.status(404).json({ error: 'Guild not found' });
+      return;
+    }
+    const lim = Math.min(Math.max(parseInt(String(req.query.limit ?? '100'), 10) || 100, 1), 500);
+    const entries = await AuditLogModel.find({ guildId }).sort({ createdAt: -1 }).limit(lim);
+    res.json({
+      entries: entries.map((e) => ({
+        id: String(e._id),
+        action: e.action,
+        actorId: e.actorId,
+        targetId: e.targetId,
+        detail: e.detail,
+        createdAt: e.createdAt,
+      })),
+    });
+  });
+
+  return app;
 }

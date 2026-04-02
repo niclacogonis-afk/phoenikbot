@@ -14,12 +14,15 @@ const handler: ModalHandler = {
     const roleId = parts[2]!;
 
     if (action === 'captcha') {
+      // Defer reply immediately to avoid timeout
+      await interaction.deferReply({ ephemeral: true });
+      
       const code = interaction.fields.getTextInputValue('code');
       const result = await VerificationManager.verifyCaptcha(interaction.member, code, roleId);
       if (result.success) {
-        await interaction.reply({ embeds: [successEmbed('Verified!', 'You now have access to the server!')], ephemeral: true });
+        await interaction.editReply({ embeds: [successEmbed('Verified!', 'You now have access to the server!')] });
       } else {
-        await interaction.reply({ embeds: [errorEmbed('Verification Failed', result.reason)], ephemeral: true });
+        await interaction.editReply({ embeds: [errorEmbed('Verification Failed', result.reason)] });
       }
     }
   },

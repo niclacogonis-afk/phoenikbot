@@ -1,5 +1,4 @@
 import 'dotenv/config';
-process.env['NODE_TLS_REJECT_UNAUTHORIZED'] = '0';
 import { setupErrorHandlers } from './utils/errorHandler';
 import { logger } from './utils/logger';
 import { connectDatabase } from './database/connection';
@@ -81,6 +80,44 @@ function setupCronJobs(client: BotClient) {
       await checkScheduledMessages(client);
     } catch (err) {
       logger.error('Schedule cron error:', err instanceof Error ? err : new Error(String(err)));
+    }
+  });
+
+  // Check expired Phoenik licenses every 10 minutes
+  cron.schedule('*/10 * * * *', async () => {
+    try {
+      const { PhoenikLicenseModel } = await import('./database/models/PhoenikLicense');
+
+      const expired = await PhoenikLicenseModel.find({
+        active: true,
+        expiresAt: { $lte: new Date() },
+      });
+
+      for (const license of expired) {
+        license.active = false;
+        await license.save();
+
+        const guild = client.guilds.cache.get(license.guildId);
+        if (guild) {
+          const member = await guild.members.fetch(license.discordId).catch(() => null);
+          if (member) {
+            await member.roles.remove(license.roleId, 'Phoenik license expired').catch(() => null);
+            logger.info(`Removed expired Phoenik license from ${member.user.tag} in ${guild.name}`);
+          }
+        }
+      }
+    } catch (err) {
+      logger.error('Phoenik license cron error:', err instanceof Error ? err : new Error(String(err)));
+    }
+  });
+
+  // Check Roblox updates every 15 minutes
+  cron.schedule('*/15 * * * *', async () => {
+    try {
+      const { RobloxUpdateNotifier } = await import('./modules/roblox/RobloxUpdateNotifier');
+      await RobloxUpdateNotifier.checkForUpdates(client);
+    } catch (err) {
+      logger.error('Roblox update cron error:', err instanceof Error ? err : new Error(String(err)));
     }
   });
 

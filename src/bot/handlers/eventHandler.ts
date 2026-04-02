@@ -1,12 +1,13 @@
 import { BotClient } from '../client';
 import { BotEvent } from '../../types';
 import { logger } from '../../utils/logger';
+import { isHandlerSourceFile } from '../../utils/handlerFiles';
 import path from 'path';
 import fs from 'fs';
 
 export async function loadEvents(client: BotClient): Promise<void> {
   const eventsPath = path.join(__dirname, '..', 'events');
-  const files = fs.readdirSync(eventsPath).filter((f) => f.endsWith('.ts') || f.endsWith('.js'));
+  const files = fs.readdirSync(eventsPath).filter(isHandlerSourceFile);
 
   for (const file of files) {
     try {

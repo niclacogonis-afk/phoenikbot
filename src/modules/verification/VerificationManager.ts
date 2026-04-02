@@ -1,6 +1,7 @@
 import { GuildMember, Guild, TextChannel, EmbedBuilder, ButtonBuilder, ButtonStyle, ActionRowBuilder } from 'discord.js';
 import { getUser } from '../../database/models/User';
 import { GlobalBanModel } from '../../database/models/GlobalBan';
+import { getGuild } from '../../database/models/Guild';
 import { logger } from '../../utils/logger';
 
 export class VerificationManager {
@@ -15,6 +16,11 @@ export class VerificationManager {
 
   static async startCaptcha(member: GuildMember): Promise<string> {
     const code = VerificationManager.generateCode(6);
+    await VerificationManager.startCaptchaWithCode(member, code);
+    return code;
+  }
+
+  static async startCaptchaWithCode(member: GuildMember, code: string): Promise<void> {
     const expires = new Date(Date.now() + 5 * 60 * 1000);
 
     const user = await getUser(member.guild.id, member.user.id);
@@ -22,8 +28,6 @@ export class VerificationManager {
     user.captchaExpires = expires;
     user.captchaAttempts = 0;
     await user.save();
-
-    return code;
   }
 
   static async verifyCaptcha(member: GuildMember, input: string, verifiedRoleId: string): Promise<{ success: boolean; reason?: string }> {
@@ -39,21 +43,27 @@ export class VerificationManager {
       return { success: false, reason: 'Captcha expired. Please start verification again.' };
     }
 
-    user.captchaAttempts++;
+    // Normalize input: trim whitespace and convert to uppercase
+    const normalizedInput = input.trim().toUpperCase();
+    const storedCode = user.captchaCode.toUpperCase();
 
+    // Check if code is correct BEFORE incrementing attempts
+    if (normalizedInput === storedCode) {
+      await VerificationManager.grantVerification(member, verifiedRoleId, user);
+      return { success: true };
+    }
+
+    // Only increment attempts if code was wrong
+    user.captchaAttempts++;
+    await user.save();
+
+    // Check if too many attempts AFTER saving
     if (user.captchaAttempts >= 5) {
-      await user.save();
       await member.kick('Failed captcha verification too many times').catch(() => null);
       return { success: false, reason: 'Too many failed attempts. You have been kicked.' };
     }
 
-    if (input.toUpperCase() !== user.captchaCode) {
-      await user.save();
-      return { success: false, reason: `Incorrect code. ${5 - user.captchaAttempts} attempts remaining.` };
-    }
-
-    await VerificationManager.grantVerification(member, verifiedRoleId, user);
-    return { success: true };
+    return { success: false, reason: `Incorrect code. ${5 - user.captchaAttempts} attempts remaining.` };
   }
 
   static async startRobloxVerify(member: GuildMember): Promise<string> {
@@ -123,13 +133,24 @@ export class VerificationManager {
     }
   }
 
-  private static async grantVerification(member: GuildMember, roleId: string, user: import('../../database/models/User').IUser): Promise<void> {
+  public static async grantVerification(member: GuildMember, roleId: string, user?: import('../../database/models/User').IUser): Promise<void> {
+    // Add verified role
     await member.roles.add(roleId, 'Verification').catch(() => null);
-    user.verified = true;
-    user.verifiedAt = new Date();
-    user.captchaCode = null;
-    user.captchaExpires = null;
-    user.riskScore = Math.max(0, user.riskScore - 10);
-    await user.save();
+    
+    // Remove unverified role if configured
+    const guild = await getGuild(member.guild.id);
+    const unverifiedRole = (guild as any).unverifiedRole as string | undefined;
+    if (unverifiedRole) {
+      await member.roles.remove(unverifiedRole, 'Verification completed').catch(() => null);
+    }
+    
+    if (user) {
+      user.verified = true;
+      user.verifiedAt = new Date();
+      user.captchaCode = null;
+      user.captchaExpires = null;
+      user.riskScore = Math.max(0, user.riskScore - 10);
+      await user.save();
+    }
   }
 }

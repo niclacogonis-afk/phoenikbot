@@ -1,6 +1,7 @@
 import { BotClient } from '../client';
 import { Command } from '../../types';
 import { logger } from '../../utils/logger';
+import { isHandlerSourceFile } from '../../utils/handlerFiles';
 import path from 'path';
 import fs from 'fs';
 
@@ -12,7 +13,7 @@ export async function loadCommands(client: BotClient): Promise<void> {
     const categoryPath = path.join(commandsPath, category);
     if (!fs.statSync(categoryPath).isDirectory()) continue;
 
-    const files = fs.readdirSync(categoryPath).filter((f) => f.endsWith('.ts') || f.endsWith('.js'));
+    const files = fs.readdirSync(categoryPath).filter(isHandlerSourceFile);
     for (const file of files) {
       try {
         const mod = await import(path.join(categoryPath, file));

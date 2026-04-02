@@ -15,7 +15,7 @@ import { isAdmin } from '../../../modules/permissions/PermissionManager';
 const MODULE_NAMES: ModuleName[] = [
   'ticket', 'giveaway', 'verification', 'antirAid', 'antinuke', 'antilink',
   'logging', 'youtube', 'twitch', 'roblox', 'ai', 'suggestions', 'reactionRoles',
-  'stats', 'schedule', 'backup', 'minigames', 'moderation',
+  'stats', 'schedule', 'backup', 'minigames', 'moderation', 'automation',
 ];
 
 const command: Command = {

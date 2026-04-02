@@ -4,10 +4,13 @@
   "description": "Advanced Discord Bot",
   "main": "dist/index.js",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && node scripts/clean-dts.js",
     "start": "node dist/index.js",
     "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
-    "deploy": "ts-node src/bot/deploy-commands.ts"
+    "deploy": "ts-node src/bot/deploy-commands.ts",
+    "pm2:start": "pm2 start ecosystem.config.cjs",
+    "pm2:reload": "pm2 reload phoenikbot",
+    "pm2:stop": "pm2 stop phoenikbot"
   },
   "dependencies": {
     "axios": "^1.7.2",

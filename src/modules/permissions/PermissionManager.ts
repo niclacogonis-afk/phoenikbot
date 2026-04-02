@@ -1,40 +1,77 @@
-import { GuildMember, PermissionFlagsBits } from 'discord.js';
-import { getCachedGuild } from '../cache/CacheManager';
-import { PermissionModel } from '../../database/models/Permission';
-import { config } from '../../config';
+import { GuildMember } from 'discord.js';
+import { GuildModel } from '../../database/models/Guild';
 
+// Export functions directly for easier imports
 export async function isStaff(member: GuildMember): Promise<boolean> {
-  if (config.ownerIds.includes(member.user.id)) return true;
-  if (member.permissions.has(PermissionFlagsBits.Administrator)) return true;
-  const guild = await getCachedGuild(member.guild.id);
-  return member.roles.cache.some((r) => guild.staffRoles.includes(r.id) || guild.adminRoles.includes(r.id));
+  const guildConfig = await GuildModel.findOne({ guildId: member.guild.id });
+  if (!guildConfig) return false;
+  
+  const staffRoleIds = guildConfig.staffRoles || [];
+  const adminRoleIds = guildConfig.adminRoles || [];
+  
+  return member.roles.cache.some(role => 
+    staffRoleIds.includes(role.id) || adminRoleIds.includes(role.id)
+  );
 }
 
 export async function isAdmin(member: GuildMember): Promise<boolean> {
-  if (config.ownerIds.includes(member.user.id)) return true;
-  if (member.permissions.has(PermissionFlagsBits.Administrator)) return true;
-  const guild = await getCachedGuild(member.guild.id);
-  return member.roles.cache.some((r) => guild.adminRoles.includes(r.id));
+  const guildConfig = await GuildModel.findOne({ guildId: member.guild.id });
+  if (!guildConfig) return false;
+  
+  const adminRoleIds = guildConfig.adminRoles || [];
+  return member.roles.cache.some(role => adminRoleIds.includes(role.id));
 }
 
-export function isBotOwner(userId: string): boolean {
-  return config.ownerIds.includes(userId);
+export async function getPermissionLevel(member: GuildMember): Promise<'user' | 'staff' | 'admin' | 'owner'> {
+  if (member.guild.ownerId === member.id) return 'owner';
+  const isAdminUser = await isAdmin(member);
+  if (isAdminUser) return 'admin';
+  const isStaffUser = await isStaff(member);
+  if (isStaffUser) return 'staff';
+  return 'user';
 }
 
-export async function canUseCommand(member: GuildMember, command: string): Promise<boolean> {
-  if (isBotOwner(member.user.id)) return true;
-
-  const override = await PermissionModel.findOne({ guildId: member.guild.id, command });
-  if (!override) return true;
-
-  if (override.usersBlocked.includes(member.user.id)) return false;
-  if (override.usersAllowed.includes(member.user.id)) return true;
-
-  const memberRoles = [...member.roles.cache.keys()];
-  if (memberRoles.some((r) => override.rolesBlocked.includes(r))) return false;
-  if (override.rolesAllowed.length > 0) {
-    return memberRoles.some((r) => override.rolesAllowed.includes(r));
+// Also export as class for backward compatibility
+export class PermissionManager {
+  static async isStaff(member: GuildMember): Promise<boolean> {
+    return isStaff(member);
   }
-
-  return true;
+  
+  static async isAdmin(member: GuildMember): Promise<boolean> {
+    return isAdmin(member);
+  }
+  
+  static async getPermissionLevel(member: GuildMember): Promise<'user' | 'staff' | 'admin' | 'owner'> {
+    return getPermissionLevel(member);
+  }
 }
+
+export const PERMISSION_LEVELS = {
+  user: 0,
+  staff: 1,
+  admin: 2,
+  owner: 3,
+} as const;
+
+export const COMMAND_PERMISSION_REQUIREMENTS: Record<string, keyof typeof PERMISSION_LEVELS> = {
+  'ticket-setup': 'staff',
+  'giveaway-create': 'staff',
+  'giveaway-end': 'staff',
+  'giveaway-reroll': 'staff',
+  'verify-setup': 'staff',
+  'nuke': 'admin',
+  ban: 'admin',
+  unban: 'admin',
+  softban: 'admin',
+  kick: 'staff',
+  mute: 'staff',
+  unmute: 'staff',
+  timeout: 'staff',
+  lock: 'staff',
+  unlock: 'staff',
+  slowmode: 'staff',
+  purge: 'staff',
+  clearwarnings: 'admin',
+  warn: 'staff',
+  removewarning: 'staff',
+};

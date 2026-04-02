@@ -1,12 +1,14 @@
 import {
   SlashCommandBuilder, ChatInputCommandInteraction, PermissionFlagsBits, GuildMember,
-  EmbedBuilder, ButtonBuilder, ButtonStyle, ActionRowBuilder, ChannelType, Colors,
+  EmbedBuilder, ButtonBuilder, ActionRowBuilder, ChannelType,
 } from 'discord.js';
 import { Command } from '../../../types';
 import { errorEmbed, successEmbed } from '../../../utils/embed';
 import { isStaff } from '../../../modules/permissions/PermissionManager';
 import { getTicketConfig, TicketConfigModel } from '../../../database/models/TicketConfig';
 import { isModuleEnabled } from '../../../modules/cache/CacheManager';
+import { safeEmbedMediaUrl } from '../../../utils/embedUrl';
+import { buildTicketOpenButtons, normalizeTicketButtons } from '../../../utils/ticketButtons';
 
 const command: Command = {
   data: new SlashCommandBuilder()
@@ -75,16 +77,12 @@ const command: Command = {
         .setDescription(config.embedDescription)
         .setTimestamp();
 
-      if (config.embedImage) embed.setImage(config.embedImage);
-      if (config.embedThumbnail) embed.setThumbnail(config.embedThumbnail);
+      const img = safeEmbedMediaUrl(config.embedImage);
+      if (img) embed.setImage(img);
+      const thumb = safeEmbedMediaUrl(config.embedThumbnail);
+      if (thumb) embed.setThumbnail(thumb);
 
-      const buttons = config.buttons.map((b) =>
-        new ButtonBuilder()
-          .setCustomId(`ticket:open:${b.type}`)
-          .setLabel(b.label)
-          .setEmoji(b.emoji)
-          .setStyle(b.style as ButtonStyle)
-      );
+      const buttons = buildTicketOpenButtons(normalizeTicketButtons(config.buttons as unknown));
 
       const rows: ActionRowBuilder<ButtonBuilder>[] = [];
       for (let i = 0; i < buttons.length; i += 5) {
