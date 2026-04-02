@@ -6,30 +6,47 @@ import { getGuild } from '../../database/models/Guild';
 import { successEmbed, errorEmbed } from '../../utils/embed';
 
 const handler: ModalHandler = {
-  customId: 'phoenik:licensekey',
+  customId: 'phoenik',
 
   async execute(interaction: ModalSubmitInteraction, client: BotClient) {
     if (!interaction.guild || !(interaction.member instanceof GuildMember)) return;
 
-    const key = interaction.fields.getTextInputValue('licensekey').trim();
+    const parts = interaction.customId.split(':');
+    const action = parts[1];
 
-    // Get the customer role from guild config or use a default
-    const guild = await getGuild(interaction.guild.id);
-    const roleId = (guild as any).verifyRole as string | undefined;
+    if (action === 'licensekey') {
+      const key = interaction.fields.getTextInputValue('licensekey').trim();
+      const guild = await getGuild(interaction.guild.id);
 
-    if (!roleId) {
-      await interaction.reply({ embeds: [errorEmbed('No role configured. Ask an admin to run /phoenik setup.')], ephemeral: true });
-      return;
+      const premiumRoleId = (guild as any).phoenikPremiumRole as string | undefined;
+      const freeRoleId = (guild as any).phoenikCustomerRole as string | undefined;
+
+      if (!premiumRoleId || !freeRoleId) {
+        await interaction.reply({ embeds: [errorEmbed('Roles not configured. Ask an admin to run /phoenik setup.')], ephemeral: true });
+        return;
+      }
+
+      await interaction.deferReply({ ephemeral: true });
+      const result = await PhoenikLicenseManager.verifyAndGrant(interaction.member, key, premiumRoleId, freeRoleId);
+
+      if (result.success) {
+        await interaction.editReply({ embeds: [successEmbed('License Verified!', result.message)] });
+      } else {
+        await interaction.editReply({ embeds: [errorEmbed(result.message)] });
+      }
     }
 
-    await interaction.deferReply({ ephemeral: true });
+    if (action === 'hwidreset') {
+      const key = interaction.fields.getTextInputValue('hwidkey').trim();
 
-    const result = await PhoenikLicenseManager.verifyAndGrant(interaction.member, key, roleId);
+      await interaction.deferReply({ ephemeral: true });
+      const result = await PhoenikLicenseManager.resetHWID(key);
 
-    if (result.success) {
-      await interaction.editReply({ embeds: [successEmbed('License Verified!', result.message)] });
-    } else {
-      await interaction.editReply({ embeds: [errorEmbed(result.message)] });
+      if (result.success) {
+        await interaction.editReply({ embeds: [successEmbed('HWID Reset', result.message)] });
+      } else {
+        await interaction.editReply({ embeds: [errorEmbed(result.message)] });
+      }
     }
   },
 };

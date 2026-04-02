@@ -33,7 +33,8 @@ export interface IGuild extends Document {
   unverifiedRole: string | null; // Role to remove when verified
   ticketCategory: string | null; // Category for ticket channels
   robloxUpdatesChannel: string | null; // Channel for Roblox update notifications
-  phoenikCustomerRole: string | null; // Role for Phoenik license customers
+  phoenikCustomerRole: string | null; // Role for Phoenik license customers (free)
+  phoenikPremiumRole: string | null; // Role for Phoenik premium customers
   createdAt: Date;
   updatedAt: Date;
 }
@@ -91,6 +92,7 @@ const GuildSchema = new Schema<IGuild>(
     ticketCategory: { type: String, default: null },
     robloxUpdatesChannel: { type: String, default: null },
     phoenikCustomerRole: { type: String, default: null },
+    phoenikPremiumRole: { type: String, default: null },
   },
   { timestamps: true }
 );
