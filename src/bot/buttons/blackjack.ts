@@ -76,7 +76,7 @@ const handler: ButtonHandler = {
 
       if (total > 21) {
         // Player busts
-        const wallet = await getUserWallet(interaction.user.id, interaction.guild.id);
+        const wallet = await getUserWallet(interaction.guild.id, interaction.user.id);
         wallet.balance = Math.max(0, wallet.balance - betAmount);
         await wallet.save();
 
@@ -135,7 +135,7 @@ const handler: ButtonHandler = {
         color = 0xED4245;
       }
 
-      const wallet = await getUserWallet(interaction.user.id, interaction.guild.id);
+      const wallet = await getUserWallet(interaction.guild.id, interaction.user.id);
       if (won) {
         wallet.balance += betAmount;
       } else if (playerTotal !== dealerTotal) {

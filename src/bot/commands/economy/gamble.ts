@@ -94,7 +94,7 @@ const command: Command = {
       const winnings = won ? amount * multiplier : 0;
 
       if (won) {
-        const wallet = await getUserWallet(interaction.user.id, interaction.guildId);
+        const wallet = await getUserWallet(interaction.guildId!, interaction.user.id);
         wallet.balance += winnings;
         await wallet.save();
       } else {
@@ -128,7 +128,7 @@ const command: Command = {
       const winnings = won ? amount * multiplier : 0;
 
       if (won) {
-        const wallet = await getUserWallet(interaction.user.id, interaction.guildId);
+        const wallet = await getUserWallet(interaction.guildId!, interaction.user.id);
         wallet.balance += winnings;
         await wallet.save();
       } else {

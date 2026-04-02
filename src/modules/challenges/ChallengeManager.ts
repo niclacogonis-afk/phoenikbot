@@ -95,7 +95,7 @@ export class ChallengeManager {
     quest.claimedAt = new Date();
     await quest.save();
 
-    const wallet = await getUserWallet(userId, guildId);
+    const wallet = await getUserWallet(guildId, userId);
     wallet.balance += challenge.reward;
     wallet.totalEarned += challenge.reward;
     await wallet.save();

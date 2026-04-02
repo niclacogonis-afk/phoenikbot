@@ -89,13 +89,13 @@ const command: Command = {
 
       const embed = new EmbedBuilder()
         .setColor(0x5865F2)
-        .setTitle('🤖 Auto-Responses')
+        .setTitle('Auto-Responses')
         .setDescription(
           responses.map((ar, i) =>
-            `**${i + 1}.** \`${String(ar._id).slice(-6)}\` — Triggers: \`${ar.triggers.join(', ')}\`\n└ ${ar.response.slice(0, 60)}${ar.response.length > 60 ? '...' : ''}`
+            `**${i + 1}.** \`${String(ar._id)}\`\nTriggers: \`${ar.triggers.join(', ')}\`\n└ ${ar.response.slice(0, 80)}${ar.response.length > 80 ? '...' : ''}`
           ).join('\n\n')
         )
-        .setFooter({ text: `${responses.length} auto-response(s)` })
+        .setFooter({ text: `${responses.length} auto-response(s) — Copy the ID to delete` })
         .setTimestamp();
 
       await interaction.editReply({ embeds: [embed] });

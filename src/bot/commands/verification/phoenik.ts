@@ -51,7 +51,6 @@ const command: Command = {
 
       const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
         new ButtonBuilder()
-          .setCustomId('phoenik:getkey')
           .setLabel('Get Key')
           .setStyle(ButtonStyle.Link)
           .setURL('https://phoenik-key-system-production-1c2c.up.railway.app/getkey.html'),
