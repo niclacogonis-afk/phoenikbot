@@ -1,5 +1,6 @@
 import {
-  ButtonInteraction, GuildMember, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder
+  ButtonInteraction, GuildMember, ModalBuilder, TextInputBuilder, TextInputStyle,
+  ActionRowBuilder, EmbedBuilder, ButtonBuilder, ButtonStyle
 } from 'discord.js';
 import { ButtonHandler } from '../../types';
 import { BotClient } from '../client';
@@ -76,23 +77,29 @@ const handler: ButtonHandler = {
     }
 
     if (action === 'download') {
-      await interaction.deferReply({ ephemeral: true });
+      const guild = await getGuild(interaction.guild!.id);
+      const downloadUrl = (guild as any).phoenikDownloadUrl as string | undefined;
 
-      try {
-        const fs = require('fs');
-        const rarPath = 'C:\\Users\\nicol\\Desktop\\PhoenikExecutor.rar';
-
-        if (fs.existsSync(rarPath)) {
-          await interaction.editReply({
-            content: '**Phoenik Executor - Latest Version**\nDownload the latest version below:',
-            files: [{ attachment: rarPath, name: 'PhoenikExecutor.rar' }]
-          });
-        } else {
-          await interaction.editReply({ embeds: [errorEmbed('File not found. Contact an admin.')] });
-        }
-      } catch (err) {
-        await interaction.editReply({ embeds: [errorEmbed('Failed to send file. Contact an admin.')] });
+      if (!downloadUrl) {
+        await interaction.reply({ embeds: [errorEmbed('Download URL not configured. Ask an admin to set it up.')], ephemeral: true });
+        return;
       }
+
+      const embed = new EmbedBuilder()
+        .setColor(0x00ff88)
+        .setTitle('Phoenik Executor - Download')
+        .setDescription(`Click the button below to download the latest version of Phoenik Executor.`)
+        .setFooter({ text: 'Make sure to scan before running' });
+
+      const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder()
+          .setLabel('Download PhoenikExecutor.rar')
+          .setStyle(ButtonStyle.Link)
+          .setURL(downloadUrl)
+          .setEmoji('⬇️')
+      );
+
+      await interaction.reply({ embeds: [embed], components: [row], ephemeral: true });
     }
   },
 };

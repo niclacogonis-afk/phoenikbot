@@ -42,6 +42,16 @@ export class PhoenikLicenseManager {
     const keyType = validation.type || 'free';
     const roleId = keyType === 'premium' || keyType === 'lifetime' ? premiumRoleId : freeRoleId;
 
+    // Check if this KEY is already used by another Discord account
+    const keyUsed = await PhoenikLicenseModel.findOne({
+      key: key.toUpperCase(),
+      active: true,
+    });
+
+    if (keyUsed && keyUsed.discordId !== member.user.id) {
+      return { success: false, message: 'This key is already used by another account.' };
+    }
+
     // Check if this Discord user already has an active license in this guild
     const existing = await PhoenikLicenseModel.findOne({
       guildId: member.guild.id,
@@ -50,6 +60,10 @@ export class PhoenikLicenseManager {
     });
 
     if (existing) {
+      // If same key, just confirm
+      if (existing.key === key.toUpperCase()) {
+        return { success: false, message: `You already verified this key. Expires: ${existing.expiresAt.toLocaleDateString()}`, type: existing.type };
+      }
       // Check if still valid
       if (existing.expiresAt > new Date()) {
         return { success: false, message: `You already have an active license until ${existing.expiresAt.toLocaleDateString()}`, type: existing.type };
@@ -64,8 +78,18 @@ export class PhoenikLicenseManager {
     await member.roles.remove(premiumRoleId, 'License update').catch(() => null);
     await member.roles.remove(freeRoleId, 'License update').catch(() => null);
 
-    // Calculate expiry
-    const expiresAt = validation.expiresAt ? new Date(validation.expiresAt) : new Date(Date.now() + 24 * 60 * 60 * 1000);
+    // Calculate expiry with proper validation
+    let expiresAt: Date;
+    if (validation.expiresAt) {
+      const parsed = new Date(validation.expiresAt);
+      if (!isNaN(parsed.getTime()) && parsed.getTime() > Date.now()) {
+        expiresAt = parsed;
+      } else {
+        expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+      }
+    } else {
+      expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    }
 
     // Create license record
     await PhoenikLicenseModel.create({
@@ -122,20 +146,37 @@ export class PhoenikLicenseManager {
   }
 
   static async checkExpiredLicenses(guild: import('discord.js').Guild): Promise<number> {
+    // Check expired by date
     const expired = await PhoenikLicenseModel.find({
       guildId: guild.id,
       active: true,
       expiresAt: { $lte: new Date() },
     });
 
+    // Check revoked keys (key no longer valid on API)
+    const active = await PhoenikLicenseModel.find({
+      guildId: guild.id,
+      active: true,
+      expiresAt: { $gt: new Date() },
+    });
+
+    const allToRemove = [...expired];
+
+    for (const license of active) {
+      const validation = await this.validateKey(license.key);
+      if (!validation.valid) {
+        allToRemove.push(license);
+      }
+    }
+
     let removed = 0;
-    for (const license of expired) {
+    for (const license of allToRemove) {
       license.active = false;
       await license.save();
 
       const member = await guild.members.fetch(license.discordId).catch(() => null);
       if (member) {
-        await member.roles.remove(license.roleId, 'Phoenik license expired').catch(() => null);
+        await member.roles.remove(license.roleId, 'Phoenik license expired/revoked').catch(() => null);
         removed++;
       }
     }

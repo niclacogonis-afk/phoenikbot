@@ -35,6 +35,7 @@ export interface IGuild extends Document {
   robloxUpdatesChannel: string | null; // Channel for Roblox update notifications
   phoenikCustomerRole: string | null; // Role for Phoenik license customers (free)
   phoenikPremiumRole: string | null; // Role for Phoenik premium customers
+  phoenikDownloadUrl: string | null; // URL for executor download
   createdAt: Date;
   updatedAt: Date;
 }
@@ -93,6 +94,7 @@ const GuildSchema = new Schema<IGuild>(
     robloxUpdatesChannel: { type: String, default: null },
     phoenikCustomerRole: { type: String, default: null },
     phoenikPremiumRole: { type: String, default: null },
+    phoenikDownloadUrl: { type: String, default: null },
   },
   { timestamps: true }
 );

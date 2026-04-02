@@ -23,6 +23,10 @@ const command: Command = {
       .setDescription('Setup the premium-only panel (HWID reset, status, download)')
       .addChannelOption(o => o.setName('channel').setDescription('Channel for premium panel').addChannelTypes(ChannelType.GuildText)))
     .addSubcommand(sub => sub
+      .setName('download')
+      .setDescription('Set the executor download URL')
+      .addStringOption(o => o.setName('url').setDescription('Direct download URL for the .rar file').setRequired(true)))
+    .addSubcommand(sub => sub
       .setName('check')
       .setDescription('Check all licenses and remove expired ones'))
     .addSubcommand(sub => sub
@@ -152,6 +156,14 @@ const command: Command = {
       ).join('\n');
 
       await interaction.reply({ embeds: [new EmbedBuilder().setTitle('Active Licenses').setDescription(list).setColor(0xFF3B3B)], ephemeral: true });
+
+    } else if (sub === 'download') {
+      const url = interaction.options.getString('url', true);
+      const guild = await getGuild(interaction.guild.id);
+      (guild as any).phoenikDownloadUrl = url;
+      await (guild as any).save();
+
+      await interaction.reply({ embeds: [successEmbed('Download URL Set', `Premium download link set to:\n${url}`)], ephemeral: true });
     }
   },
 };
