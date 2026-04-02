@@ -3,6 +3,7 @@ import { BotEvent } from '../../types';
 import { LevelManager } from '../../modules/leveling/LevelManager';
 import { EconomyManager } from '../../modules/economy/EconomyManager';
 import { ChallengeManager } from '../../modules/challenges/ChallengeManager';
+import { WeeklyLeaderboardManager } from '../../modules/leaderboard/WeeklyLeaderboardManager';
 import { AutoResponseModel } from '../../database/models/AutoResponse';
 
 const event: BotEvent = {
@@ -14,6 +15,7 @@ const event: BotEvent = {
     try { await LevelManager.onMessage(message); } catch { }
     try { await EconomyManager.onMessage(message); } catch { }
     try { await ChallengeManager.onMessage(message); } catch { }
+    try { await WeeklyLeaderboardManager.trackMessage(message.guild.id, message.author.id); } catch { }
 
     // Check auto-responses
     try {

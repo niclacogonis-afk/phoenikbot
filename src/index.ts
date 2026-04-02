@@ -121,6 +121,18 @@ function setupCronJobs(client: BotClient) {
     }
   });
 
+  // Weekly leaderboard: finalize and announce every Monday at 00:01
+  cron.schedule('1 0 * * 1', async () => {
+    try {
+      const { WeeklyLeaderboardManager } = await import('./modules/leaderboard/WeeklyLeaderboardManager');
+      await WeeklyLeaderboardManager.finalizeWeek(client);
+      await WeeklyLeaderboardManager.announceLeaderboard(client);
+      logger.info('Weekly leaderboard finalized and announced');
+    } catch (err) {
+      logger.error('Weekly leaderboard cron error:', err instanceof Error ? err : new Error(String(err)));
+    }
+  });
+
   logger.info('⏰ Cron jobs started');
 }
 
